@@ -75,7 +75,17 @@ body{background:#050507;color:#fff;height:100dvh;display:flex;overflow:hidden}
 
 <!-- MODALS -->
 <div class="modal" id="mProj"><div class="box"><h3>Nouveau projet</h3><input class="input" id="pName" placeholder="Nom — ex: KATANA Eclipse Noir"><input class="input" id="pAuthor" placeholder="Auteur — ton nom"><select id="pType"><option value="anime">Animé</option><option value="cartoon">Cartoon</option></select><textarea id="pSyn" placeholder="Synopsis, univers, ton..."></textarea><div class="row"><button class="btn" onclick="closeM('mProj')">Annuler</button><button class="btn primary" onclick="saveProj()">Créer projet</button></div></div></div>
-<div class="modal" id="mLore"><div class="box"><h3>Fiche encyclopédie</h3><select id="lType"><option value="personnage">Personnage</option><option value="technique">Technique</option><option value="lieu">Lieu</option><option value="organisation">Organisation</option><option value="lore">Lore</option></select><input class="input" id="lName" placeholder="Nom"><input class="input" id="lRole" placeholder="Rôle — Protagoniste, Katana maudit..."><input class="input" id="lImg" placeholder="Prompt image ou URL"><textarea id="lDesc" placeholder="Description complète que l'IA va utiliser..."></textarea><div class="row"><button class="btn" onclick="closeM('mLore')">Annuler</button><button class="btn primary" onclick="saveLore()">Enregistrer</button></div></div></div>
+<div class="modal" id="mLore"><div class="box"><h3>Fiche encyclopédie</h3><select id="lType"><option value="personnage">Personnage</option><option value="technique">Technique</option><option value="lieu">Lieu</option><option value="organisation">Organisation</option><option value="lore">Lore</option></select><input class="input" id="lName" placeholder="Nom"><input class="input" id="lRole" placeholder="Rôle — Protagoniste, Katana maudit...">
+<div style="display:flex;flex-direction:column;gap:8px">
+<label style="font-size:11px;color:#aaa">Image du personnage / élément</label>
+<input class="input" id="lImgFile" type="file" accept="image/*" onchange="previewLoreImage(this)">
+<div id="lImgPreview" style="display:none;position:relative">
+<img id="lImgPreviewImg" style="width:100%;max-height:260px;object-fit:contain;border-radius:12px;background:#0a0a0a;border:1px solid #252530">
+<button type="button" class="btn" style="position:absolute;right:8px;top:8px" onclick="clearLoreImage()">✕</button>
+</div>
+<p style="font-size:10px;color:#666">Importe une image depuis ton téléphone ou ton PC. Elle sera enregistrée dans le projet.</p>
+</div>
+<textarea id="lDesc" placeholder="Description complète que l'IA va utiliser..."></textarea><div class="row"><button class="btn" onclick="closeM('mLore')">Annuler</button><button class="btn primary" onclick="saveLore()">Enregistrer</button></div></div></div>
 <div class="modal" id="mSeason"><div class="box"><h3>Nouvelle saison</h3><input class="input" id="sName" placeholder="Saison 1 — L'Éveil"><input class="input" type="number" id="sCount" value="12"><textarea id="sTheme" placeholder="Arc narratif..."></textarea><div class="row"><button class="btn" onclick="closeM('mSeason')">Annuler</button><button class="btn primary" onclick="saveSeason()">Créer</button></div></div></div>
 <div class="modal" id="mGen"><div class="box"><h3>Générique</h3><div class="row"><select id="gType"><option value="opening">Opening</option><option value="ending">Ending</option></select><select id="gSeason"></select></div><input class="input" id="gTitle" placeholder="Titre musique"><textarea id="gMusic" placeholder="Musique — style, BPM, instruments..."></textarea><textarea id="gVisual" placeholder="Visuel — description..."></textarea><textarea id="gCredits" placeholder="Crédits — un par ligne"></textarea><div class="row"><button class="btn" onclick="closeM('mGen')">Annuler</button><button class="btn primary" onclick="saveGen()">Enregistrer</button></div></div></div>
 <div class="modal" id="mEp"><div class="box" style="max-width:700px"><h3>Générer épisode</h3><select id="eSeason"></select><input class="input" id="eTitle" placeholder="Titre épisode"><textarea id="ePrompt" placeholder="Que se passe-t-il? Conflit, évolution..."></textarea><div class="range"><span style="font-size:11px">Durée</span><input type="range" id="eDur" min="15" max="45" value="20" oninput="document.getElementById('durVal').innerText=this.value+' min'"><b id="durVal">20 min</b></div><div class="row"><button class="btn" onclick="closeM('mEp')">Annuler</button><button class="btn ai" onclick="generate()">✨ Générer</button></div><div id="genState" style="font-size:11px;color:#888"></div></div></div>
@@ -84,6 +94,7 @@ body{background:#050507;color:#fff;height:100dvh;display:flex;overflow:hidden}
 let supa=null, useCloud=false;
 let projects=JSON.parse(localStorage.getItem('cn-animation-v2')||'[]');
 let cur=projects[0]||null, curTab='dash', editLore=null;
+let pendingLoreImage='';
 
 function persist(){ localStorage.setItem('cn-animation-v2', JSON.stringify(projects)); if(useCloud&&supa) saveCloud(); renderList(); render(); }
 async function connect(){ let u=document.getElementById('sbUrl').value.trim(), k=document.getElementById('sbKey').value.trim(); if(!u||!k) return alert('URL + key'); supa=supabase.createClient(u,k); useCloud=true; document.getElementById('sync').innerText='CLOUD'; try{let {data}=await supa.from('cn_projects').select('*'); if(data&&data.length&&data[0].data){projects=data[0].data; cur=projects[0]; localStorage.setItem('cn-animation-v2',JSON.stringify(projects));} else {await saveCloud();}}catch(e){} renderList(); render(); }
@@ -114,13 +125,78 @@ function render(){
   return;
  }
  if(curTab==='dash') v.innerHTML=`<div class="grid" style="grid-template-columns:1fr 1fr"><div class="card" style="grid-column:span 2"><h3>${cur.name}</h3><p style="font-size:12px;color:#888;margin-top:6px">${cur.synopsis||'Pas de synopsis'}</p><div style="display:flex;gap:6px;margin-top:10px"><span class="badge">${cur.type}</span><span class="badge">${cur.lore.length} fiches</span><span class="badge">${cur.saisons.length} saisons</span><span class="badge">${cur.episodes.length}/200</span></div></div><div class="card"><h4>Encyclopédie</h4><p style="font-size:11px;color:#777">Personnages, pouvoirs, lieux</p><button class="btn primary" style="margin-top:8px" onclick="go('lore',document.querySelectorAll('.tab')[1])">Ouvrir</button></div><div class="card"><h4>Génériques</h4><p style="font-size:11px;color:#777">Opening / Ending</p><button class="btn primary" style="margin-top:8px" onclick="go('gens',document.querySelectorAll('.tab')[3])">Gérer</button></div></div>`;
- if(curTab==='lore') v.innerHTML=`<div style="display:flex;justify-content:space-between"><h3>Encyclopédie</h3><button class="btn primary" onclick="openLore()">+ Fiche</button></div><div class="grid" style="margin-top:12px">${cur.lore.map((l,i)=>`<div class="card" onclick="openLore(${i})"><img src="${l.img||'https://via.placeholder.com/300x400/13131a/fff?text='+encodeURIComponent(l.name)}"><span class="badge">${l.type} • ${l.role||''}</span><b style="font-size:12px">${l.name}</b><p style="font-size:10px;color:#777">${l.desc.slice(0,100)}...</p></div>`).join('')||'<p style="opacity:.4">Aucune fiche</p>'}</div>`;
+ if(curTab==='lore') v.innerHTML=`<div style="display:flex;justify-content:space-between"><h3>Encyclopédie</h3><button class="btn primary" onclick="openLore()">+ Fiche</button></div><div class="grid" style="margin-top:12px">${cur.lore.map((l,i)=>`<div class="card" onclick="openLore(${i})"><img src="${l.img||'data:image/svg+xml;charset=UTF-8,'+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400"><rect width="100%" height="100%" fill="#13131a"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#777" font-family="Arial" font-size="18">${l.name}</text></svg>`)}"><span class="badge">${l.type} • ${l.role||''}</span><b style="font-size:12px">${l.name}</b><p style="font-size:10px;color:#777">${l.desc.slice(0,100)}...</p></div>`).join('')||'<p style="opacity:.4">Aucune fiche</p>'}</div>`;
  if(curTab==='seasons') v.innerHTML=`<div style="display:flex;justify-content:space-between"><h3>Saisons</h3><button class="btn primary" onclick="document.getElementById('mSeason').classList.add('open')">+ Saison</button></div><div class="grid" style="margin-top:12px">${cur.saisons.map(s=>`<div class="card"><b>${s.name}</b><p style="font-size:11px;color:#777">${s.theme}</p><span class="badge">${cur.episodes.filter(e=>e.saisonId===s.id).length}/${s.count} eps</span><button class="btn" style="margin-top:8px" onclick="openGenM('${s.id}')">+ Générique</button></div>`).join('')||'<p style="opacity:.4">Pas de saison</p>'}</div>`;
  if(curTab==='gens') v.innerHTML=`<div style="display:flex;justify-content:space-between"><h3>Génériques</h3><button class="btn primary" onclick="openGenM()">+ Générique</button></div><div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">${cur.generiques.map(g=>{let s=cur.saisons.find(x=>x.id===g.saisonId);return `<div class="card"><b>${g.type.toUpperCase()} — ${s?s.name:''} — ${g.title}</b><p style="font-size:11px;color:#aaa">Musique: ${g.music}</p><p style="font-size:11px;color:#aaa">Visuel: ${g.visual}</p><pre style="font-size:10px;color:#666;white-space:pre-wrap">${g.credits}</pre></div>`}).join('')||'<p style="opacity:.4">Aucun générique</p>'}</div>`;
  if(curTab==='eps') v.innerHTML=`<div style="display:flex;justify-content:space-between"><h3>Épisodes — ${cur.episodes.length}/200</h3><button class="btn ai" onclick="openGenEp()">✨ Générer</button></div><div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">${cur.episodes.map((ep,i)=>`<div class="card" style="flex-direction:row;align-items:center"><div style="width:52px;height:52px;background:#000;border-radius:12px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:11px;text-align:center">${i+1}<br>${ep.duration||20}'</div><div style="flex:1"><b style="font-size:12px">${ep.title}</b><p style="font-size:11px;color:#777">${ep.prompt.slice(0,80)}...</p></div><button class="btn" onclick="playEp(${i})">▶</button></div>`).join('')||'<p style="opacity:.4">Aucun épisode</p>'}</div>`;
 }
-function openLore(i=null){ editLore=i; if(i!==null){let l=cur.lore[i]; document.getElementById('lType').value=l.type; document.getElementById('lName').value=l.name; document.getElementById('lRole').value=l.role; document.getElementById('lImg').value=l.imgPrompt||''; document.getElementById('lDesc').value=l.desc;} else {document.getElementById('lName').value='';document.getElementById('lRole').value='';document.getElementById('lImg').value='';document.getElementById('lDesc').value='';} document.getElementById('mLore').classList.add('open'); }
-async function saveLore(){ let n=document.getElementById('lName').value.trim(); if(!n) return alert('Nom requis'); let pr=document.getElementById('lImg').value.trim(); let img=pr? (pr.startsWith('http')?pr:`https://image.pollinations.ai/prompt/${encodeURIComponent(pr+', anime key visual')}`) : ''; let e={id:Date.now(), type:document.getElementById('lType').value, name:n, role:document.getElementById('lRole').value, imgPrompt:pr, img, desc:document.getElementById('lDesc').value}; if(editLore!==null) cur.lore[editLore]=e; else cur.lore.push(e); closeM('mLore'); persist(); }
+function openLore(i=null){
+ editLore=i;
+ pendingLoreImage='';
+ const file=document.getElementById('lImgFile');
+ if(file) file.value='';
+ const preview=document.getElementById('lImgPreview');
+ if(i!==null){
+  let l=cur.lore[i];
+  document.getElementById('lType').value=l.type;
+  document.getElementById('lName').value=l.name;
+  document.getElementById('lRole').value=l.role||'';
+  document.getElementById('lDesc').value=l.desc||'';
+  pendingLoreImage=l.img||'';
+  if(l.img){
+   document.getElementById('lImgPreviewImg').src=l.img;
+   preview.style.display='block';
+  }else{
+   preview.style.display='none';
+  }
+ } else {
+  document.getElementById('lType').value='personnage';
+  document.getElementById('lName').value='';
+  document.getElementById('lRole').value='';
+  document.getElementById('lDesc').value='';
+  preview.style.display='none';
+ }
+ document.getElementById('mLore').classList.add('open');
+}
+
+function previewLoreImage(input){
+ const f=input.files&&input.files[0];
+ if(!f) return;
+ if(!f.type.startsWith('image/')) return alert('Choisis un fichier image.');
+ if(f.size>6*1024*1024) return alert('Image trop lourde. Maximum : 6 Mo.');
+ const reader=new FileReader();
+ reader.onload=()=>{
+  pendingLoreImage=reader.result;
+  document.getElementById('lImgPreviewImg').src=pendingLoreImage;
+  document.getElementById('lImgPreview').style.display='block';
+ };
+ reader.readAsDataURL(f);
+}
+
+function clearLoreImage(){
+ pendingLoreImage='';
+ const file=document.getElementById('lImgFile');
+ if(file) file.value='';
+ document.getElementById('lImgPreview').style.display='none';
+}
+
+function saveLore(){
+ let n=document.getElementById('lName').value.trim();
+ if(!n) return alert('Nom requis');
+ let old=editLore!==null?cur.lore[editLore]:null;
+ let e={
+  id:old?old.id:Date.now(),
+  type:document.getElementById('lType').value,
+  name:n,
+  role:document.getElementById('lRole').value,
+  img:pendingLoreImage || '',
+  desc:document.getElementById('lDesc').value
+ };
+ if(editLore!==null) cur.lore[editLore]=e;
+ else cur.lore.push(e);
+ closeM('mLore');
+ persist();
+}
 function saveSeason(){ let n=document.getElementById('sName').value.trim(); if(!n) return alert('Nom requis'); cur.saisons.push({id:'s'+Date.now(), name:n, count:parseInt(document.getElementById('sCount').value)||12, theme:document.getElementById('sTheme').value}); closeM('mSeason'); persist(); }
 function openGenM(pre=null){ let s=document.getElementById('gSeason'); s.innerHTML=cur.saisons.map(x=>`<option value="${x.id}" ${x.id===pre?'selected':''}>${x.name}</option>`).join(''); document.getElementById('mGen').classList.add('open'); }
 function saveGen(){ let sid=document.getElementById('gSeason').value; if(!sid) return alert('Saison requise'); cur.generiques.push({id:'g'+Date.now(), saisonId:sid, type:document.getElementById('gType').value, title:document.getElementById('gTitle').value, music:document.getElementById('gMusic').value, visual:document.getElementById('gVisual').value, credits:document.getElementById('gCredits').value}); closeM('mGen'); persist(); }
