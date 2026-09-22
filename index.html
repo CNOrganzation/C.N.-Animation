@@ -92,11 +92,96 @@ body{background:#050507;color:#fff;height:100dvh;display:flex;overflow:hidden}
 
 <script>
 let supa=null, useCloud=false;
-let projects=JSON.parse(localStorage.getItem('cn-animation-v2')||'[]');
-let cur=projects[0]||null, curTab='dash', editLore=null;
+let projects=[];
+let cur=null, curTab='dash', editLore=null;
 let pendingLoreImage='';
+const DB_NAME='cn-animation-images-v1';
+const DB_STORE='images';
 
-function persist(){ localStorage.setItem('cn-animation-v2', JSON.stringify(projects)); if(useCloud&&supa) saveCloud(); renderList(); render(); }
+function openImageDB(){
+ return new Promise((resolve,reject)=>{
+  const req=indexedDB.open(DB_NAME,1);
+  req.onupgradeneeded=()=>{ if(!req.result.objectStoreNames.contains(DB_STORE)) req.result.createObjectStore(DB_STORE); };
+  req.onsuccess=()=>resolve(req.result);
+  req.onerror=()=>reject(req.error);
+ });
+}
+async function saveImage(dataUrl){
+ const db=await openImageDB();
+ const id='img_'+Date.now()+'_'+Math.random().toString(36).slice(2);
+ await new Promise((resolve,reject)=>{
+  const tx=db.transaction(DB_STORE,'readwrite');
+  tx.objectStore(DB_STORE).put(dataUrl,id);
+  tx.oncomplete=resolve; tx.onerror=()=>reject(tx.error);
+ });
+ return 'idb:'+id;
+}
+async function getImage(key){
+ if(!key) return '';
+ if(!key.startsWith('idb:')) return key;
+ try{
+  const db=await openImageDB();
+  return await new Promise((resolve,reject)=>{
+   const tx=db.transaction(DB_STORE,'readonly');
+   const req=tx.objectStore(DB_STORE).get(key.slice(4));
+   req.onsuccess=()=>resolve(req.result||'');
+   req.onerror=()=>reject(req.error);
+  });
+ }catch(e){return '';}
+}
+async function deleteImage(key){
+ if(!key||!key.startsWith('idb:')) return;
+ try{
+  const db=await openImageDB();
+  await new Promise((resolve,reject)=>{
+   const tx=db.transaction(DB_STORE,'readwrite');
+   tx.objectStore(DB_STORE).delete(key.slice(4));
+   tx.oncomplete=resolve; tx.onerror=()=>reject(tx.error);
+  });
+ }catch(e){}
+}
+async function migrateImages(){
+ let changed=false;
+ for(const p of projects){
+  for(const l of (p.lore||[])){
+   if(l.img && l.img.startsWith('data:image/')){
+    l.img=await saveImage(l.img);
+    changed=true;
+   }
+  }
+ }
+ if(changed) safePersist();
+}
+function loadProjects(){
+ try{
+  projects=JSON.parse(localStorage.getItem('cn-animation-v2')||'[]');
+  if(!Array.isArray(projects)) projects=[];
+ }catch(e){ projects=[]; }
+ cur=projects[0]||null;
+ migrateImages();
+}
+function safePersist(){
+ try{
+  localStorage.setItem('cn-animation-v2',JSON.stringify(projects));
+  if(useCloud&&supa) saveCloud();
+  renderList(); render();
+  return true;
+ }catch(e){
+  console.error(e);
+  alert('Impossible d’enregistrer localement. Le stockage du navigateur est plein.');
+  return false;
+ }
+}
+function persist(){ return safePersist(); }
+
+async function hydrateLoreImages(){
+ if(curTab!=='lore') return;
+ document.querySelectorAll('[data-lore-img]').forEach(async el=>{
+  const key=el.getAttribute('data-lore-img');
+  const src=await getImage(key);
+  if(src) el.src=src;
+ });
+}
 async function connect(){ let u=document.getElementById('sbUrl').value.trim(), k=document.getElementById('sbKey').value.trim(); if(!u||!k) return alert('URL + key'); supa=supabase.createClient(u,k); useCloud=true; document.getElementById('sync').innerText='CLOUD'; try{let {data}=await supa.from('cn_projects').select('*'); if(data&&data.length&&data[0].data){projects=data[0].data; cur=projects[0]; localStorage.setItem('cn-animation-v2',JSON.stringify(projects));} else {await saveCloud();}}catch(e){} renderList(); render(); }
 async function saveCloud(){ if(!supa) return; try{await supa.from('cn_projects').upsert({id:1,data:projects});}catch(e){} }
 
@@ -125,7 +210,10 @@ function render(){
   return;
  }
  if(curTab==='dash') v.innerHTML=`<div class="grid" style="grid-template-columns:1fr 1fr"><div class="card" style="grid-column:span 2"><h3>${cur.name}</h3><p style="font-size:12px;color:#888;margin-top:6px">${cur.synopsis||'Pas de synopsis'}</p><div style="display:flex;gap:6px;margin-top:10px"><span class="badge">${cur.type}</span><span class="badge">${cur.lore.length} fiches</span><span class="badge">${cur.saisons.length} saisons</span><span class="badge">${cur.episodes.length}/200</span></div></div><div class="card"><h4>Encyclopédie</h4><p style="font-size:11px;color:#777">Personnages, pouvoirs, lieux</p><button class="btn primary" style="margin-top:8px" onclick="go('lore',document.querySelectorAll('.tab')[1])">Ouvrir</button></div><div class="card"><h4>Génériques</h4><p style="font-size:11px;color:#777">Opening / Ending</p><button class="btn primary" style="margin-top:8px" onclick="go('gens',document.querySelectorAll('.tab')[3])">Gérer</button></div></div>`;
- if(curTab==='lore') v.innerHTML=`<div style="display:flex;justify-content:space-between"><h3>Encyclopédie</h3><button class="btn primary" onclick="openLore()">+ Fiche</button></div><div class="grid" style="margin-top:12px">${cur.lore.map((l,i)=>`<div class="card" onclick="openLore(${i})"><img src="${l.img||'data:image/svg+xml;charset=UTF-8,'+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400"><rect width="100%" height="100%" fill="#13131a"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#777" font-family="Arial" font-size="18">${l.name}</text></svg>`)}"><span class="badge">${l.type} • ${l.role||''}</span><b style="font-size:12px">${l.name}</b><p style="font-size:10px;color:#777">${l.desc.slice(0,100)}...</p></div>`).join('')||'<p style="opacity:.4">Aucune fiche</p>'}</div>`;
+ if(curTab==='lore') {
+ v.innerHTML=`<div style="display:flex;justify-content:space-between"><h3>Encyclopédie</h3><button class="btn primary" onclick="openLore()">+ Fiche</button></div><div class="grid" style="margin-top:12px">${cur.lore.map((l,i)=>`<div class="card" onclick="openLore(${i})"><img data-lore-img="${l.img||''}" src="${l.img&&l.img.startsWith('data:image/')?l.img:'data:image/svg+xml;charset=UTF-8,'+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400"><rect width="100%" height="100%" fill="#13131a"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#777" font-family="Arial" font-size="18">${l.name}</text></svg>`)}"><span class="badge">${l.type} • ${l.role||''}</span><b style="font-size:12px">${l.name}</b><p style="font-size:10px;color:#777">${(l.desc||'').slice(0,100)}...</p></div>`).join('')||'<p style="opacity:.4">Aucune fiche</p>'}</div>`;
+ hydrateLoreImages();
+}
  if(curTab==='seasons') v.innerHTML=`<div style="display:flex;justify-content:space-between"><h3>Saisons</h3><button class="btn primary" onclick="document.getElementById('mSeason').classList.add('open')">+ Saison</button></div><div class="grid" style="margin-top:12px">${cur.saisons.map(s=>`<div class="card"><b>${s.name}</b><p style="font-size:11px;color:#777">${s.theme}</p><span class="badge">${cur.episodes.filter(e=>e.saisonId===s.id).length}/${s.count} eps</span><button class="btn" style="margin-top:8px" onclick="openGenM('${s.id}')">+ Générique</button></div>`).join('')||'<p style="opacity:.4">Pas de saison</p>'}</div>`;
  if(curTab==='gens') v.innerHTML=`<div style="display:flex;justify-content:space-between"><h3>Génériques</h3><button class="btn primary" onclick="openGenM()">+ Générique</button></div><div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">${cur.generiques.map(g=>{let s=cur.saisons.find(x=>x.id===g.saisonId);return `<div class="card"><b>${g.type.toUpperCase()} — ${s?s.name:''} — ${g.title}</b><p style="font-size:11px;color:#aaa">Musique: ${g.music}</p><p style="font-size:11px;color:#aaa">Visuel: ${g.visual}</p><pre style="font-size:10px;color:#666;white-space:pre-wrap">${g.credits}</pre></div>`}).join('')||'<p style="opacity:.4">Aucun générique</p>'}</div>`;
  if(curTab==='eps') v.innerHTML=`<div style="display:flex;justify-content:space-between"><h3>Épisodes — ${cur.episodes.length}/200</h3><button class="btn ai" onclick="openGenEp()">✨ Générer</button></div><div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">${cur.episodes.map((ep,i)=>`<div class="card" style="flex-direction:row;align-items:center"><div style="width:52px;height:52px;background:#000;border-radius:12px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:11px;text-align:center">${i+1}<br>${ep.duration||20}'</div><div style="flex:1"><b style="font-size:12px">${ep.title}</b><p style="font-size:11px;color:#777">${ep.prompt.slice(0,80)}...</p></div><button class="btn" onclick="playEp(${i})">▶</button></div>`).join('')||'<p style="opacity:.4">Aucun épisode</p>'}</div>`;
@@ -142,13 +230,8 @@ function openLore(i=null){
   document.getElementById('lName').value=l.name;
   document.getElementById('lRole').value=l.role||'';
   document.getElementById('lDesc').value=l.desc||'';
-  pendingLoreImage=l.img||'';
-  if(l.img){
-   document.getElementById('lImgPreviewImg').src=l.img;
-   preview.style.display='block';
-  }else{
-   preview.style.display='none';
-  }
+  preview.style.display=l.img?'block':'none';
+  if(l.img) getImage(l.img).then(src=>{if(src) document.getElementById('lImgPreviewImg').src=src;});
  } else {
   document.getElementById('lType').value='personnage';
   document.getElementById('lName').value='';
@@ -158,7 +241,6 @@ function openLore(i=null){
  }
  document.getElementById('mLore').classList.add('open');
 }
-
 function previewLoreImage(input){
  const f=input.files&&input.files[0];
  if(!f) return;
@@ -172,24 +254,30 @@ function previewLoreImage(input){
  };
  reader.readAsDataURL(f);
 }
-
-function clearLoreImage(){
+async function clearLoreImage(){
+ if(editLore!==null && cur.lore[editLore] && cur.lore[editLore].img){
+  await deleteImage(cur.lore[editLore].img);
+ }
  pendingLoreImage='';
  const file=document.getElementById('lImgFile');
  if(file) file.value='';
  document.getElementById('lImgPreview').style.display='none';
 }
-
-function saveLore(){
+async function saveLore(){
  let n=document.getElementById('lName').value.trim();
  if(!n) return alert('Nom requis');
  let old=editLore!==null?cur.lore[editLore]:null;
+ let imgKey=old?old.img||'':'';
+ if(pendingLoreImage){
+  imgKey=await saveImage(pendingLoreImage);
+  if(old&&old.img) await deleteImage(old.img);
+ }
  let e={
   id:old?old.id:Date.now(),
   type:document.getElementById('lType').value,
   name:n,
   role:document.getElementById('lRole').value,
-  img:pendingLoreImage || '',
+  img:imgKey,
   desc:document.getElementById('lDesc').value
  };
  if(editLore!==null) cur.lore[editLore]=e;
@@ -230,7 +318,7 @@ function playEp(idx){
 }
 function exportCurrent(){ if(!cur) return; let b=new Blob([JSON.stringify(cur,null,2)],{type:'application/json'}); let a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=cur.name.replace(/\s+/g,'_')+'.json'; a.click(); }
 
-renderList(); render();
+loadProjects(); renderList(); render();
 </script>
 </body>
 </html>
