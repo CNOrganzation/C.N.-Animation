@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>C.N. Animation</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.2/build/cjs/vexflow.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&family=Bebas+Neue&display=swap');
+*{box-sizing:border-box;margin:0;padding:0;font-family:'Inter',sans-serif}
+body{background:#050507;color:#fff;height:100dvh;display:flex;overflow:hidden}
+:root{--bg:#0b0b0f;--card:#13131a;--border:#1f1f28;--muted:#8a8a9a}
+.sidebar{width:264px;background:var(--bg);border-right:1px solid var(--border);display:flex;flex-direction:column}
+.logo{height:56px;display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid var(--border);font-weight:900}
+.logo i{width:28px;height:28px;background:#fff;color:#000;border-radius:7px;display:flex;align-items:center;justify-content:center;font-style:normal;font-size:11px}
+.list{flex:1;overflow:auto;padding:10px;display:flex;flex-direction:column;gap:8px}
+.proj{padding:12px;border-radius:14px;background:var(--card);border:1px solid var(--border);cursor:pointer}
+.proj.active{background:#fff;color:#000;border-color:#fff}.proj.active small{color:#000}
+.proj b{font-size:13px;display:block}.proj small{font-size:10px;color:var(--muted)}
+.main{flex:1;display:flex;flex-direction:column;min-width:0;background:#08080c}
+.top{height:56px;border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 14px;gap:8px;background:var(--bg)}
+.btn{height:36px;padding:0 14px;border-radius:12px;border:1px solid var(--border);background:#191922;color:#fff;font-size:12px;font-weight:600;cursor:pointer}
+.btn.primary{background:#fff;color:#000;border-color:#fff}.btn.ai{background:#6d28ff;border-color:#6d28ff;color:#fff}
+.tabs{display:flex;gap:6px;padding:10px 12px;border-bottom:1px solid var(--border);overflow:auto}
+.tab{height:32px;padding:0 14px;border-radius:20px;border:1px solid var(--border);background:var(--card);color:#777;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap}
+.tab.active{background:#fff;color:#000}
+.view{flex:1;overflow:auto;padding:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:12px;display:flex;flex-direction:column;gap:8px}
+.card img{width:100%;aspect-ratio:3/4;object-fit:cover;border-radius:12px;background:#0a0a0a}
+.input, textarea, select{width:100%;background:#11111a;border:1px solid var(--border);border-radius:12px;padding:11px;color:#fff;font-size:12px;outline:none}
+textarea{min-height:90px;resize:vertical}
+.badge{font-size:9px;padding:4px 7px;border-radius:6px;background:#1d1d28;color:#aaa;font-weight:700;text-transform:uppercase;letter-spacing:.5px}
+.player{background:#000;border:1px solid var(--border);border-radius:18px;overflow:hidden;max-width:960px;margin:auto}
+.screen{aspect-ratio:16/9;background:#000;display:flex;align-items:center;justify-content:center;flex-direction:column;text-align:center;padding:24px;position:relative}
+.screen h1{font-family:'Bebas Neue';font-size:72px;letter-spacing:2px;line-height:.9}
+.screen h2{font-size:16px;opacity:.7;margin-top:8px}
+.credit{animation:in.5s ease both}
+@keyframes in{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+.bar{height:2px;background:#1a1a22;display:flex}.bar i{height:100%;background:#fff;transition:.4s;display:block}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.75);backdrop-filter:blur(12px);display:none;align-items:center;justify-content:center;z-index:50;padding:16px}
+.modal.open{display:flex}
+.box{width:100%;max-width:620px;background:#12121a;border:1px solid var(--border);border-radius:18px;padding:18px;display:flex;flex-direction:column;gap:12px;max-height:92vh;overflow:auto}
+.row{display:flex;gap:8px}.row>*{flex:1}
+.range{display:flex;align-items:center;gap:12px;background:#11111a;border:1px solid var(--border);border-radius:12px;padding:10px 12px}
+.range input{flex:1}
+.ep-text{white-space:pre-wrap;font-size:13px;line-height:21px}
+@media(max-width:860px){.sidebar{width:100%;position:absolute;z-index:20;height:100%;transform:translateX(-100%);transition:.25s}.sidebar.open{transform:translateX(0)}.top.menu{display:flex!important}}
+</style>
+</head>
+<body>
+<div class="sidebar" id="sidebar">
+<div class="logo"><i>CN</i> ANIMATION <span style="margin-left:auto;font-size:10px;color:#666" id="syncState">LOCAL</span></div>
+<div style="padding:12px;display:flex;flex-direction:column;gap:8px">
+<button class="btn primary" style="width:100%" onclick="newProject()">+ Nouveau projet</button>
+<div style="display:flex;gap:6px"><input class="input" id="sbUrl" placeholder="Supabase URL"><input class="input" id="sbKey" placeholder="anon key"></div>
+<button class="btn" style="width:100%" onclick="connectSupabase()">Connecter cloud</button>
+<p style="font-size:10px;color:#666">5 projets max • 200 épisodes/projet • Durée 15-45 min</p>
+</div>
+<div class="list" id="projList"></div>
+</div>
+
+<div class="main">
+<div class="top">
+<button class="btn menu" style="display:none" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
+<div style="font-weight:700" id="title">—</div>
+<div style="margin-left:auto;display:flex;gap:6px">
+<button class="btn" onclick="exportCurrent()">Export</button>
+<button class="btn ai" onclick="openGen()">✨ Générer épisode</button>
+</div>
+</div>
+<div class="tabs" id="tabs">
+<button class="tab active" data-t="dash" onclick="go('dash',this)">Tableau</button>
+<button class="tab" data-t="lore" onclick="go('lore',this)">Encyclopédie</button>
+<button class="tab" data-t="seasons" onclick="go('seasons',this)">Saisons</button>
+<button class="tab" data-t="gens" onclick="go('gens',this)">Génériques</button>
+<button class="tab" data-t="eps" onclick="go('eps',this)">Épisodes</button>
+</div>
+<div class="view" id="view"></div>
+</div>
+
+<div class="modal" id="mProj"><div class="box"><h3>Nouveau projet</h3><input class="input" id="pName" placeholder="Nom — ex: KATANA: Eclipse Noir"><input class="input" id="pAuthor" placeholder="Auteur"><select id="pType"><option value="anime">Animé</option><option value="cartoon">Cartoon</option></select><textarea id="pSyn" placeholder="Synopsis global, univers, ton..."></textarea><div class="row"><button class="btn" onclick="closeMod('mProj')">Annuler</button><button class="btn primary" onclick="saveProj()">Créer</button></div></div></div>
+
+<div class="modal" id="mLore"><div class="box"><h3>Fiche encyclopédie</h3><select id="lType"><option value="personnage">Personnage</option><option value="technique">Technique / Capacité</option><option value="lieu">Lieu</option><option value="organisation">Organisation / Clan</option><option value="lore">Lore général</option></select><input class="input" id="lName" placeholder="Nom"><input class="input" id="lRole" placeholder="Rôle — ex: Protagoniste, Katana maudit, Empire..."><input class="input" id="lImg" placeholder="Prompt image ou URL — ex: samouraï yeux violets, cape noire"><textarea id="lDesc" placeholder="Description que l'IA va utiliser — personnalité, passé, pouvoirs, relations, limites... Sois précis, c'est la mémoire de l'IA."></textarea><div class="row"><button class="btn" onclick="closeMod('mLore')">Annuler</button><button class="btn primary" onclick="saveLore()">Enregistrer</button></div></div></div>
+
+<div class="modal" id="mSeason"><div class="box"><h3>Nouvelle saison</h3><input class="input" id="sName" placeholder="Saison 1 — L'Éveil"><input class="input" type="number" id="sCount" value="12"><textarea id="sTheme" placeholder="Arc narratif de la saison, enjeux..."></textarea><div class="row"><button class="btn" onclick="closeMod('mSeason')">Annuler</button><button class="btn primary" onclick="saveSeason()">Créer</button></div></div></div>
+
+<div class="modal" id="mGen"><div class="box"><h3>Générique</h3><div class="row"><select id="gType"><option value="opening">Opening — début</option><option value="ending">Ending — fin</option></select><select id="gSeason"></select></div><input class="input" id="gTitle" placeholder="Titre — ex: ZETSUMEI / Eve"><textarea id="gMusic" placeholder="Musique — ex: J-rock épique 138 BPM, batterie sèche, guitare saturée, refrain chanté voix masculine rauque, pont piano..."></textarea><textarea id="gVisual" placeholder="Visuel — ex: travelling sur ville sous pluie, Ren dégaine au ralenti, éclairs violets, titres qui apparaissent..."></textarea><textarea id="gCredits" placeholder="Crédits — un par ligne&#10;Réalisation:...&#10;Character Design:...&#10;Storyboard:...&#10;Musique:..."></textarea><div class="row"><button class="btn" onclick="closeMod('mGen')">Annuler</button><button class="btn primary" onclick="saveGen()">Enregistrer</button></div></div></div>
+
+<div class="modal" id="mEp"><div class="box" style="max-width:720px"><h3>Générer épisode</h3><select id="eSeason"></select><input class="input" id="eTitle" placeholder="Titre — ex: La lame oubliée"><textarea id="ePrompt" placeholder="Que se passe-t-il dans cet épisode? Donne l'intention, le conflit, l'évolution. L'IA s'occupe du reste."></textarea>
+<div class="range"><span style="font-size:11px">Durée</span><input type="range" id="eDur" min="15" max="45" value="20" oninput="document.getElementById('durVal').innerText=this.value+' min'"><b id="durVal" style="font-size:12px">20 min</b></div>
+<p style="font-size:10px;color:#888">Recommandé: 20 min • 15 min = ~1200 mots • 45 min = ~3800 mots • Utilise encyclopédie + épisodes précédents</p>
+<div class="row"><button class="btn" onclick="closeMod('mEp')">Annuler</button><button class="btn ai" onclick="generate()">✨ Générer</button></div><div id="genState" style="font-size:11px;color:#aaa"></div></div></div>
+
+<script>
+let supa=null, useCloud=false;
+let projects=JSON.parse(localStorage.getItem('cn-animation-v2')||'[]');
+let cur=projects[0]||null, currentTab='dash', editLoreIdx=null;
+
+function persist(){ localStorage.setItem('cn-animation-v2', JSON.stringify(projects)); if(useCloud&&supa) saveCloud(); renderList(); render(); }
+async function connectSupabase(){
+ let url=document.getElementById('sbUrl').value.trim(), key=document.getElementById('sbKey').value.trim();
+ if(!url||!key) return alert('Colle URL + anon key Supabase');
+ supa=supabase.createClient(url,key); useCloud=true; document.getElementById('syncState').innerText='CLOUD';
+ try{ let {data}=await supa.from('cn_projects').select('*'); if(data&&data.length){ projects=data[0].data||projects; localStorage.setItem('cn-animation-v2', JSON.stringify(projects)); } else { await saveCloud(); } }catch(e){ console.log(e); }
+ cur=projects[0]||null; renderList(); render();
+}
+async function saveCloud(){ if(!supa) return; try{ await supa.from('cn_projects').upsert({id:1, data:projects}); }catch(e){} }
+
+function newProject(){ if(projects.length>=5) return alert('5 projets max'); document.getElementById('mProj').classList.add('open'); }
+function closeMod(id){ document.getElementById(id).classList.remove('open'); }
+function saveProj(){
+ let name=document.getElementById('pName').value.trim(); if(!name) return alert('Nom requis');
+ projects.push({id:Date.now(), name, author:document.getElementById('pAuthor').value||'Anonyme', type:document.getElementById('pType').value, synopsis:document.getElementById('pSyn').value, lore:[], saisons:[], generiques:[], episodes:[]});
+ cur=projects[projects.length-1]; closeMod('mProj'); persist();
+}
+function renderList(){
+ let el=document.getElementById('projList'); el.innerHTML='';
+ projects.forEach(p=>{
+  let d=document.createElement('div'); d.className='proj'+(cur&&cur.id===p.id?' active':'');
+  d.innerHTML=`<b>${p.name}</b><small>${p.type} • ${p.author} • ${p.episodes.length}/200</small>`;
+  d.onclick=()=>{ cur=p; document.getElementById('sidebar').classList.remove('open'); renderList(); render(); };
+  el.appendChild(d);
+ });
+ document.getElementById('title').innerText=cur? cur.name+' — '+cur.author : 'Aucun projet';
+}
+function go(t,el){ currentTab=t; document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active')); if(el) el.classList.add('active'); render(); }
+function render(){
+ let v=document.getElementById('view'); if(!cur){ v.innerHTML='<p style="opacity:.5">Crée un projet.</p>'; return; }
+ if(currentTab==='dash'){
+  v.innerHTML=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div class="card" style="grid-column:span 2"><h3>${cur.name}</h3><p style="font-size:12px;color:#aaa;margin-top:6px">${cur.synopsis||''}</p><div style="display:flex;gap:6px;margin-top:10px"><span class="badge">${cur.type}</span><span class="badge">${cur.lore.length} fiches</span><span class="badge">${cur.saisons.length} saisons</span><span class="badge">${cur.episodes.length}/200</span></div></div>
+  <div class="card"><h4>Encyclopédie</h4><p style="font-size:11px;color:#888">Personnages, techniques, lieux. C'est la mémoire de l'IA.</p><button class="btn primary" style="margin-top:8px" onclick="go('lore',document.querySelector('[data-t=lore]'))">Ouvrir</button></div>
+  <div class="card"><h4>Génériques</h4><p style="font-size:11px;color:#888">Opening / ending par saison avec musique et crédits.</p><button class="btn primary" style="margin-top:8px" onclick="go('gens',document.querySelector('[data-t=gens]'))">Gérer</button></div></div>`;
+ }
+ if(currentTab==='lore'){
+  v.innerHTML=`<div style="display:flex;justify-content:space-between;margin-bottom:12px"><h3>Encyclopédie</h3><button class="btn primary" onclick="openLore()">+ Fiche</button></div><div class="grid">${cur.lore.map((l,i)=>`<div class="card" onclick="openLore(${i})"><img src="${l.img||'https://via.placeholder.com/300x400/0e0e10/fff?text='+encodeURIComponent(l.name)}"><div><span class="badge">${l.type}</span> <span class="badge">${l.role||''}</span></div><b style="font-size:12px">${l.name}</b><p style="font-size:10px;color:#888">${l.desc.slice(0,110)}...</p></div>`).join('')||'<p style="opacity:.5">Aucune fiche. Ajoute tes personnages, pouvoirs, lieux.</p>'}</div>`;
+ }
+ if(currentTab==='seasons'){
+  v.innerHTML=`<div style="display:flex;justify-content:space-between"><h3>Saisons</h3><button class="btn primary" onclick="document.getElementById('mSeason').classList.add('open')">+ Saison</button></div><div class="grid" style="margin-top:12px">${cur.saisons.map(s=>`<div class="card"><b>${s.name}</b><p style="font-size:11px;color:#888">${s.theme}</p><span class="badge">${cur.episodes.filter(e=>e.saisonId===s.id).length}/${s.count} épisodes</span><button class="btn" style="margin-top:8px" onclick="openGen('${s.id}')">+ Générique</button></div>`).join('')||'<p style="opacity:.5">Pas de saison</p>'}</div>`;
+ }
+ if(currentTab==='gens'){
+  v.innerHTML=`<div style="display:flex;justify-content:space-between"><h3>Génériques</h3><button class="btn primary" onclick="openGen()">+ Générique</button></div><div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">${cur.generiques.map(g=>{let s=cur.saisons.find(x=>x.id===g.saisonId); return `<div class="card"><b>${g.type==='opening'?'OPENING':'ENDING'} — ${s?s.name:''} — ${g.title}</b><p style="font-size:11px;color:#aaa"><b>Musique:</b> ${g.music}</p><p style="font-size:11px;color:#aaa"><b>Visuel:</b> ${g.visual}</p><pre style="font-size:10px;color:#888;white-space:pre-wrap;margin-top:6px">${g.credits}</pre></div>`}).join('')||'<p style="opacity:.5">Aucun générique</p>'}</div>`;
+ }
+ if(currentTab==='eps'){
+  v.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center"><h3>Épisodes — ${cur.episodes.length}/200</h3><button class="btn ai" onclick="openGenEp()">✨ Générer</button></div><div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">${cur.episodes.map((ep,i)=>`<div class="card" style="flex-direction:row;align-items:center"><div style="width:52px;height:52px;background:#000;border-radius:12px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:11px">EP${i+1}<br>${ep.duration||20}'</div><div style="flex:1"><b style="font-size:12px">${ep.title}</b><p style="font-size:11px;color:#888">${ep.prompt.slice(0,90)}...</p></div><button class="btn" onclick="playEp(${i})">▶ Lire</button><button class="btn" onclick="exportEp(${i})">⬇</button></div>`).join('')||'<p style="opacity:.5">Aucun épisode</p>'}</div>`;
+ }
+}
+function openLore(i=null){ editLoreIdx=i; let m=document.getElementById('mLore'); if(i!==null){ let l=cur.lore[i]; document.getElementById('lType').value=l.type; document.getElementById('lName').value=l.name; document.getElementById('lRole').value=l.role; document.getElementById('lImg').value=l.imgPrompt||''; document.getElementById('lDesc').value=l.desc; } else { document.getElementById('lName').value=''; document.getElementById('lRole').value=''; document.getElementById('lImg').value=''; document.getElementById('lDesc').value=''; } m.classList.add('open'); }
+async function saveLore(){
+ let name=document.getElementById('lName').value.trim(); if(!name) return alert('Nom requis');
+ let prompt=document.getElementById('lImg').value.trim(); let img='';
+ if(prompt){ img=prompt.startsWith('http')?prompt:`https://image.pollinations.ai/prompt/${encodeURIComponent(prompt+', anime key visual, clean background')}`; }
+ let entry={id:Date.now(), type:document.getElementById('lType').value, name, role:document.getElementById('lRole').value, imgPrompt:prompt, img, desc:document.getElementById('lDesc').value};
+ if(editLoreIdx!==null) cur.lore[editLoreIdx]=entry; else cur.lore.push(entry);
+ closeMod('mLore'); persist();
+}
+function saveSeason(){
+ let name=document.getElementById('sName').value.trim(); if(!name) return alert('Nom requis');
+ cur.saisons.push({id:'s'+Date.now(), name, count:parseInt(document.getElementById('sCount').value)||12, theme:document.getElementById('sTheme').value});
+ closeMod('mSeason'); persist();
+}
+function openGen(pre=null){ let sel=document.getElementById('gSeason'); sel.innerHTML=cur.saisons.map(s=>`<option value="${s.id}" ${s.id===pre?'selected':''}>${s.name}</option>`).join(''); document.getElementById('mGen').classList.add('open'); }
+function saveGen(){ let sid=document.getElementById('gSeason').value; if(!sid) return alert('Saison requise'); cur.generiques.push({id:'g'+Date.now(), saisonId:sid, type:document.getElementById('gType').value, title:document.getElementById('gTitle').value, music:document.getElementById('gMusic').value, visual:document.getElementById('gVisual').value, credits:document.getElementById('gCredits').value}); closeMod('mGen'); persist(); }
+function openGenEp(){ if(!cur.saisons.length) return alert('Crée une saison'); let sel=document.getElementById('eSeason'); sel.innerHTML=cur.saisons.map(s=>`<option value="${s.id}">${s.name}</option>`).join(''); document.getElementById('mEp').classList.add('open'); }
+function openGen(){ let sel=document.getElementById('gSeason'); sel.innerHTML=cur.saisons.map(s=>`<option value="${s.id}">${s.name}</option>`).join(''); document.getElementById('mGen').classList.add('open'); }
+
+async function generate(){
+ if(cur.episodes.length>=200) return alert('200 max');
+ let sid=document.getElementById('eSeason').value, title=document.getElementById('eTitle').value.trim()||`Épisode ${cur.episodes.length+1}`, prompt=document.getElementById('ePrompt').value.trim(), dur=parseInt(document.getElementById('eDur').value)||20;
+ if(!prompt) return alert('Donne un prompt');
+ let state=document.getElementById('genState'); state.innerText='⏳ Écriture en cours — analyse du lore, continuité, rythme '+dur+'min...';
+ let words= dur<=20? 1300 : dur<=30? 2100 : dur<=40? 3000 : 3800;
+ let loreText=cur.lore.map(l=>`[${l.type.toUpperCase()} | ${l.role}] ${l.name}: ${l.desc}`).join('\n').slice(0,6000);
+ let prev=cur.episodes.slice(-4).map((e,i)=>`EP ${cur.episodes.length-3+i} "${e.title}": ${e.summary||e.generated.slice(0,250)}`).join('\n\n');
+ let saison=cur.saisons.find(s=>s.id===sid);
+
+ let system=`Tu es showrunner anime primé. Projet ${cur.type.toUpperCase()}: "${cur.name}" par ${cur.author}. Synopsis: ${cur.synopsis}. Saison: ${saison.name} - ${saison.theme}.
+DURÉE CIBLE: ${dur} minutes → ${words} mots environ. Rythme: acte 1 25%, acte 2 50%, acte 3 25%. Si 20min: 5-10-5. Si 45min: 11-23-11.
+
+LORE COMPLET (ta bible):
+${loreText}
+
+CONTINUITÉ - 4 derniers épisodes:
+${prev}
+
+CONSIGNES QUALITÉ ÉLEVÉE:
+- Écris comme un vrai épisode d'anime culte, pas un résumé. Cinématographique.
+- Structure: COLD OPEN accrocheur (1 scène forte), GÉNÉRIQUE mention, puis 3 actes.
+- Décris les images entre [crochets]: [Intérieur temple - nuit - pluie], [Gros plan main qui tremble], [OST:...].
+- Dialogues percutants, subtext, pas d'exposition lourde.
+- Utilise les fiches lore: pouvoirs avec coûts, faiblesses, relations.
+- Cliffhanger final qui donne envie de voir la suite.
+- Pas de blabla méta. Direct l'épisode.
+
+ÉPISODE À ÉCRIRE: "${title}"
+Intention utilisateur: ${prompt}
+
+Format sortie:
+TITRE: ${title}
+RÉSUMÉ (3 lignes):
+...
+SCÉNARIO COMPLET:
+[COLD OPEN]
+...
+[ACTE I]
+...
+[ACTE II]
+...
+[ACTE III - CLIMAX & CLIFFHANGER]
+...
+FIN.
+`;
+
+ try{
+  let res=await fetch('https://text.pollinations.ai/openai', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({model:'open', messages:[{role:'user', content:system}], max_tokens:Math.min(4000, words*2)})});
+  let data=await res.json(); let text=data.choices?data.choices[0].message.content: await res.text();
+  if(!text||text.length<200) throw 'réponse courte';
+  cur.episodes.push({id:'ep'+Date.now(), saisonId:sid, title, prompt, duration:dur, summary:text.slice(0,320), generated:text, createdAt:new Date().toISOString()});
+  state.innerText='✅ Épisode prêt — '+dur+' min';
+  setTimeout(()=>{ closeMod('mEp'); persist(); go('eps', document.querySelector('[data-t=eps]')); },600);
+ }catch(e){
+  state.innerText='❌ '+e+' — mode local';
+  cur.episodes.push({id:'ep'+Date.now(), saisonId:sid, title, prompt, duration:dur, summary:'(offline) '+prompt, generated:`[OFFLINE - ${dur}min]\nTITRE: ${title}\n\n[Synopsis basé sur ton prompt]\n${prompt}\n\n[Lore utilisé]\n${loreText.slice(0,800)}\n\n[Épisode à régénérer en ligne pour version complète]`, createdAt:new Date().toISOString()});
+  persist();
+ }
+}
+
+function playEp(idx){
+ let ep=cur.episodes[idx], saison=cur.saisons.find(s=>s.id===ep.saisonId);
+ let op=cur.generiques.find(g=>g.saisonId===ep.saisonId && g.type==='opening');
+ let ed=cur.generiques.find(g=>g.saisonId===ep.saisonId && g.type==='ending');
+ let v=document.getElementById('view');
+ v.innerHTML=`<div class="player" id="player"><div class="bar"><i id="pbar" style="width:0%"></i></div><div class="screen" id="scr"></div><div style="padding:10px;display:flex;gap:6px"><button class="btn" onclick="render()">←</button><button class="btn primary" id="nextBtn" onclick="next()">Suivant →</button><button class="btn" onclick="exportEp(${idx})">Exporter</button><span style="margin-left:auto;font-size:10px;color:#666">${ep.title} • ${ep.duration||20} min</span></div></div>`;
+ let screens=[];
+ screens.push({html:`<h1>C.N. ANIMATION</h1>`, d:2000});
+ screens.push({html:`<h2>Histoire originale de</h2><h1 style="font-size:42px">${cur.author}</h1>`, d:2500});
+ if(op){ let cr=op.credits.split('\n').map((c,i)=>`<div class="credit" style="animation-delay:${i*0.15}s">${c}</div>`).join(''); screens.push({html:`<div style="position:absolute;top:14px;left:14px;font-size:10px;opacity:.5">OPENING</div><div style="max-width:640px"><h2 style="color:#a78bfa">🎵 ${op.title}</h2><p style="font-size:12px;margin-top:10px"><b>Musique:</b> ${op.music}</p><p style="font-size:12px;margin-top:6px"><b>Visuel:</b> ${op.visual}</p><div style="margin-top:14px;font-size:11px;line-height:18px">${cr}</div></div>`, d:6000}); }
+ ep.generated.split('\n\n').forEach(chunk=>{ if(chunk.trim().length>10) screens.push({html:`<div style="text-align:left;max-width:720px" class="ep-text">${chunk.replace(/</g,'&lt;')}</div>`, d: durToMs(ep.duration, chunk)}); });
+ if(ed){ let cr=ed.credits.split('\n').map((c,i)=>`<div class="credit" style="animation-delay:${i*0.15}s">${c}</div>`).join(''); screens.push({html:`<div style="position:absolute;top:14px;left:14px;font-size:10px;opacity:.5">ENDING</div><div style="max-width:640px"><h2 style="color:#f472b6">🎵 ${ed.title}</h2><p style="font-size:12px;margin-top:10px"><b>Musique:</b> ${ed.music}</p><p style="font-size:12px;margin-top:6px"><b>Visuel:</b> ${ed.visual}</p><div style="margin-top:14px;font-size:11px">${cr}</div></div>`, d:5000}); }
+ screens.push({html:`<h1>FIN</h1><p style="opacity:.6;margin-top:8px">${ep.title}</p>`, d:2000});
+ let i=0, auto=true;
+ function show(k){ if(k>=screens.length) return; document.getElementById('scr').innerHTML=screens[k].html; document.getElementById('pbar').style.width=((k+1)/screens.length*100)+'%'; if(auto) setTimeout(()=>{ if(i===k){ i++; show(i); }}, screens[k].d); }
+ window.next=()=>{ i++; show(i); };
+ show(0);
+}
+function durToMs(totalMin, chunk){ let base= totalMin<=20? 3500 : totalMin<=30? 4500 : 5500; return Math.min(8000, base + chunk.length*8); }
+
+function exportCurrent(){ if(!cur) return; let blob=new Blob([JSON.stringify(cur,null,2)],{type:'application/json'}); let a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=cur.name.replace(/\s+/g,'_')+'.json'; a.click(); }
+function exportEp(idx){ let ep=cur.episodes[idx]; let txt=`C.N. ANIMATION\n${cur.name} — ${ep.title} (${ep.duration} min)\nAuteur: ${cur.author}\nPrompt: ${ep.prompt}\n\n${ep.generated}`; let blob=new Blob([txt],{type:'text/plain'}); let a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=ep.title.replace(/\s+/g,'_')+'.txt'; a.click(); }
+
+function newProject(){ document.getElementById('mProj').classList.add('open'); }
+
+renderList(); render();
+
+// --- TABLE SUPABASE À CRÉER ---
+// SQL: create table cn_projects (id bigint primary key, data jsonb);
+</script>
+</body>
+</html>
