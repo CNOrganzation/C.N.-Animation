@@ -8,7 +8,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;900&family=Bebas+Neue&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;font-family:'Inter',sans-serif}
 body{background:#050507;color:#fff;height:100dvh;display:flex;overflow:hidden}
-.sidebar{width:280px;background:#0b0b0f;border-right:1px solid #1f1f28;display:flex;flex-direction:column;flex:none;z-index:30;transition:.25s}
+.sidebar{width:280px;background:#0b0b0f;border-right:1px solid #1f1f28;display:flex;flex-direction:column;flex:none;z-index:40;transition:.25s}
 .logo{height:56px;display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid #1f1f28;font-weight:900}
 .logo i{width:28px;height:28px;background:#fff;color:#000;border-radius:7px;display:flex;align-items:center;justify-content:center;font-style:normal;font-size:11px}
 .list{flex:1;overflow:auto;padding:10px;display:flex;flex-direction:column;gap:8px}
@@ -35,16 +35,17 @@ body{background:#050507;color:#fff;height:100dvh;display:flex;overflow:hidden}
 .empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:40px 20px}
 .player{background:#000;border:1px solid #1f1f28;border-radius:18px;overflow:hidden;max-width:960px;margin:auto;width:100%}
 .screen{aspect-ratio:16/9;background:#000;display:flex;align-items:center;justify-content:center;flex-direction:column;text-align:center;position:relative;overflow:hidden}
-.screen h1{font-family:'Bebas Neue';font-size:64px}
 .screen.frame{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity.35s}
 .ken{animation:ken 3s ease-in-out forwards}@keyframes ken{0%{transform:scale(1)}100%{transform:scale(1.22) translate(-1%,-1%)}}
 .pan{animation:pan 2.5s ease-in-out forwards}@keyframes pan{0%{transform:scale(1.1) translateX(5%)}100%{transform:scale(1.2) translateX(-5%)}}
+#overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:30}
+#overlay.show{display:block}
 @media(max-width:860px){.sidebar{position:fixed;inset:0 auto 0 0;transform:translateX(-100%)}.sidebar.open{transform:translateX(0)}.burger{display:flex!important}}
 </style>
 </head>
 <body>
 <div class="sidebar" id="sidebar">
-<div class="logo"><i>CN</i> ANIMATION <span style="margin-left:auto;font-size:10px;color:#666" id="sync">LOCAL</span></div>
+<div class="logo"><i>CN</i> ANIMATION <span style="font-size:10px;color:#666" id="sync">LOCAL</span><button class="btn burger" style="display:none;width:32px;height:32px;padding:0;margin-left:auto" onclick="closeSide()">✕</button></div>
 <div style="padding:12px;display:flex;flex-direction:column;gap:8px">
 <button class="btn primary" style="width:100%;height:44px" onclick="openNew()">+ Nouveau projet</button>
 <div style="display:flex;gap:6px"><input class="input" id="sbUrl" placeholder="Supabase URL"><input class="input" id="sbKey" placeholder="anon key"></div>
@@ -53,9 +54,11 @@ body{background:#050507;color:#fff;height:100dvh;display:flex;overflow:hidden}
 </div>
 <div class="list" id="projList"></div>
 </div>
+<div id="overlay" onclick="closeSide()"></div>
+
 <div class="main">
 <div class="top">
-<button class="btn burger" style="display:none;width:38px;padding:0" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
+<button class="btn burger" style="display:none;width:38px;padding:0" onclick="openSide()">☰</button>
 <div style="font-weight:700" id="title">Aucun projet</div>
 <div style="margin-left:auto;display:flex;gap:6px">
 <button class="btn" onclick="exportCurrent()">Export</button>
@@ -79,6 +82,9 @@ body{background:#050507;color:#fff;height:100dvh;display:flex;overflow:hidden}
 <div class="modal" id="mEp"><div class="box"><h3>Générer épisode</h3><select id="eSeason"></select><input class="input" id="eTitle" placeholder="Titre"><textarea id="ePrompt" placeholder="Que se passe-t-il?"></textarea><div class="range"><span>Durée</span><input type="range" id="eDur" min="5" max="45" value="15" oninput="document.getElementById('durVal').innerText=this.value+' min'"><b id="durVal">15 min</b></div><div class="row"><button class="btn" onclick="closeM('mEp')">Annuler</button><button class="btn ai" onclick="generate()">✨ Générer</button></div><div id="genState" style="font-size:11px;color:#888"></div></div></div>
 
 <script>
+function openSide(){document.getElementById('sidebar').classList.add('open');document.getElementById('overlay').classList.add('show');}
+function closeSide(){document.getElementById('sidebar').classList.remove('open');document.getElementById('overlay').classList.remove('show');}
+
 let supa=null,useCloud=false,projects=[],cur=null,curTab='dash',editLore=null,editGen=null,pendingLoreFile=null,pendingGenFile=null,pendingLoreUrl='',pendingGenUrl='';
 const DB_NAME='cn-animation-images-v1',DB_STORE='images';
 function openImageDB(){return new Promise((res,rej)=>{const r=indexedDB.open(DB_NAME,1);r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains(DB_STORE)) r.result.createObjectStore(DB_STORE);};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
@@ -94,8 +100,8 @@ async function connect(){let u=document.getElementById('sbUrl').value.trim(),k=d
 async function saveCloud(){if(!supa) return; try{await supa.from('cn_projects').upsert({id:1,data:projects});}catch(e){}}
 function openNew(){document.getElementById('mProj').classList.add('open');}
 function closeM(id){document.getElementById(id).classList.remove('open'); if(id==='mGen'){editGen=null;pendingGenFile=null;pendingGenUrl='';} if(id==='mLore'){editLore=null;pendingLoreFile=null;pendingLoreUrl='';}}
-function saveProj(){let n=document.getElementById('pName').value.trim();if(!n) return alert('Nom');if(projects.length>=5) return alert('5 max');let p={id:Date.now(),name:n,author:document.getElementById('pAuthor').value||'Anonyme',type:document.getElementById('pType').value,synopsis:document.getElementById('pSyn').value,lore:[],saisons:[],generiques:[],episodes:[]};projects.push(p);cur=p;closeM('mProj');persist();}
-function renderList(){let el=document.getElementById('projList');el.innerHTML='';projects.forEach(p=>{let d=document.createElement('div');d.className='proj'+(cur&&cur.id===p.id?' active':'');d.innerHTML=`<b style="font-size:13px">${p.name}</b><small style="display:block;color:#888">${p.episodes.length}/200</small>`;d.onclick=()=>{cur=p;renderList();render();};el.appendChild(d);});document.getElementById('title').innerText=cur?cur.name:'Aucun projet';}
+function saveProj(){let n=document.getElementById('pName').value.trim();if(!n) return alert('Nom');if(projects.length>=5) return alert('5 max');let p={id:Date.now(),name:n,author:document.getElementById('pAuthor').value||'Anonyme',type:document.getElementById('pType').value,synopsis:document.getElementById('pSyn').value,lore:[],saisons:[],generiques:[],episodes:[]};projects.push(p);cur=p;closeM('mProj');persist();closeSide();}
+function renderList(){let el=document.getElementById('projList');el.innerHTML='';projects.forEach(p=>{let d=document.createElement('div');d.className='proj'+(cur&&cur.id===p.id?' active':'');d.innerHTML=`<b style="font-size:13px">${p.name}</b><small style="display:block;color:#888">${p.episodes.length}/200</small>`;d.onclick=()=>{cur=p;renderList();render();closeSide();};el.appendChild(d);});document.getElementById('title').innerText=cur?cur.name:'Aucun projet';}
 function go(t,el){curTab=t;document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));if(el) el.classList.add('active');render();}
 function render(){
  let v=document.getElementById('view'); if(!cur){v.innerHTML=`<div class="empty"><h3>Aucun projet</h3><button class="btn primary" onclick="openNew()">+ Créer</button></div>`;return;}
@@ -129,7 +135,7 @@ async function generate(){if(cur.episodes.length>=200) return alert('200 max');l
 async function playEp(idx){
  let ep=cur.episodes[idx], op=cur.generiques.find(g=>g.saisonId===ep.saisonId&&g.type==='opening'), ed=cur.generiques.find(g=>g.saisonId===ep.saisonId&&g.type==='ending');
  let v=document.getElementById('view');
- v.innerHTML=`<div class="player"><div class="screen" id="scr"><img id="fA" class="frame"><img id="fB" class="frame"><div style="position:absolute;inset:0;background:linear-gradient(transparent 30%, rgba(0,0,0,.9));z-index:2"></div><div id="capt" style="position:absolute;bottom:0;left:0;right:0;z-index:3;padding:12px;font-size:12px;white-space:pre-wrap"></div><img id="logoShow" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);max-width:68%;max-height:42%;z-index:5;display:none"><div id="counter" style="position:absolute;top:10px;left:10px;z-index:4;font-size:10px;background:rgba(0,0,0,.6);padding:4px 8px;border-radius:20px"></div><div id="pre" style="position:absolute;inset:0;background:#000;z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px"><h2 id="preTxt" style="font-family:Bebas Neue;font-size:28px">Préparation...</h2><div style="width:70%;height:6px;background:#222;border-radius:10px;overflow:hidden"><div id="preBar" style="height:100%;background:#fff;width:0%"></div></div><div id="preCount" style="font-size:11px;color:#888"></div></div></div><div style="padding:10px;display:flex;gap:6px;align-items:center"><button class="btn" onclick="render()">← Retour</button><div style="display:flex;gap:4px"><button class="btn" onclick="setUnique(1)" id="b1">1/sec</button><button class="btn primary" onclick="setUnique(2)" id="b2">2/sec</button><button class="btn" onclick="setUnique(3)" id="b3">3/sec</button></div><div style="display:flex;gap:4px;margin-left:6px"><button class="btn" onclick="setFluid(12)" id="f12">12 fps</button><button class="btn primary" onclick="setFluid(24)" id="f24">24 fps</button></div><button class="btn primary" id="playBtn" style="margin-left:auto">⏸</button></div></div>`;
+ v.innerHTML=`<div class="player"><div class="screen" id="scr"><img id="fA" class="frame"><img id="fB" class="frame"><div style="position:absolute;inset:0;background:linear-gradient(transparent 30%, rgba(0,0,0,.9));z-index:2"></div><div id="capt" style="position:absolute;bottom:0;left:0;right:0;z-index:3;padding:12px;font-size:12px;white-space:pre-wrap"></div><img id="logoShow" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);max-width:68%;max-height:42%;z-index:5;display:none"><div id="counter" style="position:absolute;top:10px;left:10px;z-index:4;font-size:10px;background:rgba(0,0,0,.6);padding:4px 8px;border-radius:20px"></div><div id="pre" style="position:absolute;inset:0;background:#000;z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px"><h2 style="font-family:Bebas Neue;font-size:28px">Préparation...</h2><div style="width:70%;height:6px;background:#222;border-radius:10px;overflow:hidden"><div id="preBar" style="height:100%;background:#fff;width:0%"></div></div><div id="preCount" style="font-size:11px;color:#888"></div></div></div><div style="padding:10px;display:flex;gap:6px;align-items:center"><button class="btn" onclick="render()">← Retour</button><div style="display:flex;gap:4px"><button class="btn" onclick="setUnique(1)" id="b1">1/sec</button><button class="btn primary" onclick="setUnique(2)" id="b2">2/sec</button><button class="btn" onclick="setUnique(3)" id="b3">3/sec</button></div><div style="display:flex;gap:4px;margin-left:6px"><button class="btn" onclick="setFluid(12)" id="f12">12 fps</button><button class="btn primary" onclick="setFluid(24)" id="f24">24 fps</button></div><button class="btn primary" id="playBtn" style="margin-left:auto">⏸</button></div></div>`;
  let plans=[]; if(op){plans.push(`[OPENING ${op.title}] ${op.visual}`); op.credits.split('\n').filter(l=>l.trim()).forEach(c=>plans.push(`[CREDIT] ${c}`));} plans=plans.concat(ep.generated.split('\n').filter(l=>l.trim().length>8)); if(ed){plans.push(`[ENDING ${ed.title}] ${ed.visual}`);}
  let uniqueFps=ep.preFps||2, fluidFps=24;
  window.setUnique=(n)=>{uniqueFps=n; document.querySelectorAll('#b1,#b2,#b3').forEach(b=>b.classList.remove('primary')); document.getElementById('b'+n).classList.add('primary'); restartGen(true);};
@@ -148,7 +154,7 @@ async function playEp(idx){
    let usePlans=plans.slice(0,totalUnique);
    for(let k=0;k<usePlans.length;k++){
      let url=urlFor(usePlans[k], 1000+k);
-     let ok=await new Promise(res=>{let im=new Image(); im.onload=()=>res(true); im.onerror=()=>res(false); im.src=url;});
+     await new Promise(res=>{let im=new Image(); im.onload=()=>res(true); im.onerror=()=>res(false); im.src=url;});
      frames.push({text:usePlans[k], url});
      document.getElementById('preBar').style.width=((k+1)/usePlans.length*100)+'%';
      document.getElementById('preCount').innerText=`${k+1}/${usePlans.length} images • SAVED auto après`;
@@ -167,8 +173,8 @@ async function playEp(idx){
      if(!openingLogoShown && op && logoSrc && k===2){ let l=document.getElementById('logoShow'); l.src=logoSrc; l.style.display='block'; setTimeout(()=>l.style.display='none',3000); openingLogoShown=true; }
    }
    showUnique(0);
-   let playInterval=setInterval(()=>{ if(!playing) return; idxFrame++; if(idxFrame<frames.length) showUnique(idxFrame); }, 1000/uniqueFps);
-   let motionInterval=setInterval(()=>{ if(!playing) return; let s=1.15+Math.sin(Date.now()/600)*0.05; curImg.style.transform=`scale(${s}) translate(${Math.sin(Date.now()/400)*4}px, ${Math.cos(Date.now()/500)*3}px)`; }, 1000/fluidFps);
+   setInterval(()=>{ if(!playing) return; idxFrame++; if(idxFrame<frames.length) showUnique(idxFrame); }, 1000/uniqueFps);
+   setInterval(()=>{ if(!playing) return; let s=1.15+Math.sin(Date.now()/600)*0.05; curImg.style.transform=`scale(${s}) translate(${Math.sin(Date.now()/400)*4}px, ${Math.cos(Date.now()/500)*3}px)`; }, 1000/fluidFps);
    document.getElementById('playBtn').onclick=()=>{playing=!playing; document.getElementById('playBtn').innerText=playing?'⏸':'▶';};
  }
  restartGen(false);
