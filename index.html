@@ -163,6 +163,8 @@ async function playEp(idx){
 }
 function exportCurrent(){if(!cur) return;let b=new Blob([JSON.stringify(cur,null,2)],{type:'application/json'});let a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=cur.name.replace(/\s+/g,'_')+'.json';a.click();}
 loadProjects();renderList();render();
-</script>
+<script>
+if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+</script></script>
 </body>
 </html>
