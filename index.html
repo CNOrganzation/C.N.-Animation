@@ -49,15 +49,7 @@ body{background:#050507;color:#fff;height:100dvh;display:flex;overflow:hidden}
 <button class="btn primary" style="width:100%;height:44px" onclick="openNew()">+ Nouveau projet</button>
 <div style="display:flex;gap:6px"><input class="input" id="sbUrl" placeholder="Supabase URL"><input class="input" id="sbKey" placeholder="anon key"></div>
 <button class="btn" style="width:100%" onclick="connect()">Connecter cloud</button>
-<input class="input" id="orKey" type="password" placeholder="OpenRouter API key">
-<select class="input" id="orModel">
-<option value="openrouter/free">OpenRouter Free (auto)</option>
-<option value="nex-agi/nex-n2.5-pro:free">Nex-N2.5-Pro Free</option>
-<option value="poolside/laguna-s-2.1-20260720:free">Laguna S 2.1 Free</option>
-</select>
-<button class="btn" style="width:100%" onclick="saveOpenRouter()">Enregistrer IA</button>
-<p style="font-size:10px;color:#666">IA épisodes : OpenRouter</p>
-<p style="font-size:10px;color:#666">FIX: gen ne s'annule plus si tu quittes</p>
+<p style="font-size:10px;color:#666">FIX: gen ne s'annule plus si tu quittes</p><p style="font-size:10px;color:#9b7cff">✨ Scénario : Gemma 4 31B Free<br>🖼️ Images : OpenRouter + références du lore</p>
 </div>
 <div class="list" id="projList"></div>
 </div>
@@ -83,9 +75,63 @@ function openSide(){document.getElementById('sidebar').classList.add('open');doc
 function closeSide(){document.getElementById('sidebar').classList.remove('open');document.getElementById('overlay').classList.remove('show');}
 function toast(t){let el=document.getElementById('toast');el.innerText=t;el.style.display='block';setTimeout(()=>el.style.display='none',2500);}
 let supa=null,useCloud=false,projects=[],cur=null,curTab='dash',editLore=null,editGen=null,pendingLoreFile=null,pendingGenFile=null,pendingLoreUrl='',pendingGenUrl='';
-let openRouterKey=localStorage.getItem('cn-animation-openrouter-key')||'';
-let openRouterModel=localStorage.getItem('cn-animation-openrouter-model')||'openrouter/free';
 let playerState={active:false,epId:null,intervals:[],isGenerating:false,frames:[],uniqueFps:2,fluidFps:24,genAbort:false};
+const OR_TEXT_MODEL='google/gemma-4-31b-it:free';
+const OR_IMAGE_MODEL='openai/gpt-image-1';
+function getORKey(){return localStorage.getItem('cn-animation-openrouter-key')||'';}
+function setORKey(k){localStorage.setItem('cn-animation-openrouter-key',k.trim());}
+function escapeRegExp(s){return s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');}
+async function ensureORKey(){let k=getORKey();if(k)return k;k=prompt('Clé API OpenRouter :');if(k){setORKey(k);return k.trim();}return ''; }
+function extractDialogueCaption(text){
+ let lines=String(text||'').split(/\n+/).map(x=>x.trim()).filter(Boolean);
+ let out=[];
+ for(let line of lines){
+   if(/^DIALOGUE\s*:/i.test(line)) continue;
+   line=line.replace(/^[-•*]\s*/,'');
+   line=line.replace(/^\[[^\]]+\]\s*/,'');
+   let m=line.match(/^([^:]{1,40})\s*:\s*(.+)$/);
+   if(m){
+     let who=m[1].trim().replace(/\s*[—-]\s*[^:]{1,50}$/,'').trim();
+     let phrase=m[2].trim();
+     if(phrase && !/^(action|transition|lieu|moment|role|rôle)\s*:/i.test(phrase)) out.push(`${who} : ${phrase}`);
+   }
+ }
+ return out.join('\n');
+}
+async function refsForPlan(text){
+ let lower=String(text||'').toLocaleLowerCase('fr-FR');
+ let found=[];
+ for(const l of (cur?.lore||[])){
+   const name=String(l.name||'').trim();
+   if(!name||!l.img) continue;
+   const n=name.toLocaleLowerCase('fr-FR');
+   if(lower.includes(n)){found.push(l);continue;}
+   // Also match common possessive/inflected mentions by significant words.
+   const words=n.split(/\s+/).filter(w=>w.length>=4);
+   if(words.length && words.every(w=>lower.includes(w))) found.push(l);
+ }
+ let unique=[];
+ for(const l of found){if(!unique.some(x=>x.id===l.id)) unique.push(l);}
+ const refs=[];
+ for(const l of unique.slice(0,5)){try{const u=await resolveImg(l.img);if(u) refs.push({l,url:u});}catch(e){}}
+ return refs;
+}
+async function generateImageOpenRouter(prompt, refs, seed){
+ const key=await ensureORKey(); if(!key) throw new Error('Clé OpenRouter manquante');
+ let input_references=[];
+ for(const r of refs){
+   if(/^https?:\/\//i.test(r.url)||/^data:image\//i.test(r.url)) input_references.push({type:'image_url',image_url:{url:r.url}});
+ }
+ const body={model:OR_IMAGE_MODEL,prompt,quality:'high',output_format:'png',n:1};
+ if(input_references.length) body.input_references=input_references;
+ const res=await fetch('https://openrouter.ai/api/v1/images',{method:'POST',headers:{'Authorization':'Bearer '+key,'Content-Type':'application/json','HTTP-Referer':location.href,'X-Title':'C.N. Animation'},body:JSON.stringify(body)});
+ const raw=await res.text(); let data; try{data=JSON.parse(raw)}catch(e){throw new Error('Réponse image invalide');}
+ if(!res.ok) throw new Error(data?.error?.message||`Image HTTP ${res.status}`);
+ const b64=data?.data?.[0]?.b64_json; if(!b64) throw new Error('Aucune image reçue');
+ const mime=data?.data?.[0]?.media_type||'image/png';
+ return `data:${mime};base64,${b64}`;
+}
+
 function clearPlayerTimers(){playerState.intervals.forEach(i=>clearInterval(i));playerState.intervals=[];}
 function stopPlayer(){clearPlayerTimers();playerState.active=false;playerState.isGenerating=false;playerState.genAbort=true;}
 const DB_NAME='cn-animation-images-v1',DB_STORE='images';
@@ -97,21 +143,6 @@ function loadProjects(){try{projects=JSON.parse(localStorage.getItem('cn-animati
 function persist(){try{localStorage.setItem('cn-animation-v2',JSON.stringify(projects));if(useCloud&&supa) saveCloud();renderList();if(!playerState.active) render();}catch(e){alert('Stockage plein');}}
 async function resolveImg(key){ if(!key) return ''; if(key.startsWith('http')) return key; if(key.startsWith('idb:')) return await getImageLocal(key); return key; }
 async function hydrateImgs(){ document.querySelectorAll('[data-img]').forEach(async el=>{let k=el.getAttribute('data-img');let s=await resolveImg(k); if(s) el.src=s;});}
-function initOpenRouterUI(){
- let k=document.getElementById('orKey'),m=document.getElementById('orModel');
- if(k) k.value=openRouterKey;
- if(m) m.value=openRouterModel;
-}
-function saveOpenRouter(){
- let k=document.getElementById('orKey').value.trim();
- let m=document.getElementById('orModel').value;
- if(!k) return alert('Clé OpenRouter manquante');
- openRouterKey=k;
- openRouterModel=m;
- localStorage.setItem('cn-animation-openrouter-key',k);
- localStorage.setItem('cn-animation-openrouter-model',m);
- toast('IA OpenRouter enregistrée');
-}
 async function connect(){let u=document.getElementById('sbUrl').value.trim(),k=document.getElementById('sbKey').value.trim();if(!u||!k) return alert('URL + key');supa=supabase.createClient(u,k);useCloud=true;document.getElementById('sync').innerText='CLOUD';try{let {data}=await supa.from('cn_projects').select('*');if(data&&data.length&&data[0].data){projects=data[0].data;cur=projects[0];localStorage.setItem('cn-animation-v2',JSON.stringify(projects));}else{await saveCloud();}}catch(e){}renderList();render();}
 async function saveCloud(){if(!supa) return; try{await supa.from('cn_projects').upsert({id:1,data:projects});}catch(e){}}
 function openNew(){document.getElementById('mProj').classList.add('open');}
@@ -131,99 +162,40 @@ function delGen(i){if(confirm('Supprimer?')){cur.generiques.splice(i,1); persist
 function openGenEp(){if(!cur.saisons.length) return alert('Saison');let sel=document.getElementById('eSeason');sel.innerHTML=cur.saisons.map(s=>`<option value="${s.id}">${s.name}</option>`).join('');document.getElementById('mEp').classList.add('open');}
 async function generate(){
  if(cur.episodes.length>=200) return alert('200 max');
- if(!openRouterKey) return alert('Ajoute ta clé OpenRouter dans la barre latérale puis clique sur « Enregistrer IA ».');
-
- let sid=document.getElementById('eSeason').value;
- let title=document.getElementById('eTitle').value.trim()||`Épisode ${cur.episodes.length+1}`;
- let prompt=document.getElementById('ePrompt').value.trim();
- let dur=parseInt(document.getElementById('eDur').value)||15;
+ let sid=document.getElementById('eSeason').value,title=document.getElementById('eTitle').value.trim()||`Épisode ${cur.episodes.length+1}`,prompt=document.getElementById('ePrompt').value.trim(),dur=parseInt(document.getElementById('eDur').value)||15;
  if(!prompt) return alert('Prompt');
-
- let state=document.getElementById('genState');
- state.innerText='Génération avec OpenRouter...';
-
- let lore=cur.lore.map(l=>`[${l.type}] ${l.name}: ${l.desc}`).join('\n').slice(0,6000);
+ let key=await ensureORKey(); if(!key) return;
+ let state=document.getElementById('genState');state.innerText='Génération avec Gemma 4 31B...';
+ let lore=cur.lore.map(l=>`[${l.type}] ${l.name}${l.role?` — rôle: ${l.role}`:''}: ${l.desc||''}${l.img?' [IMAGE DE RÉFÉRENCE DISPONIBLE]':''}`).join('\n').slice(0,12000);
  let saison=cur.saisons.find(s=>s.id===sid);
-
- let full=`Tu es le scénariste principal de la série "${cur.name}".
-Type: ${cur.type}.
-Synopsis: ${cur.synopsis||'Aucun'}.
-Saison: ${saison?saison.name:'Inconnue'}.
-Arc: ${saison?saison.theme:'Aucun'}.
-
+ let full=`Tu es le showrunner de C.N. Animation. Écris un épisode complet en français, visuel, naturel et cohérent.
+CANON: ${cur.name}. Synopsis: ${cur.synopsis||'aucun'}.
+SAISON: ${saison?.name||'inconnue'} — ${saison?.theme||''}.
 LORE:
-${lore||'Aucun lore renseigné'}
+${lore||'aucun'}
+ÉPISODE: ${title}, ${dur} minutes.
+DEMANDE DU CRÉATEUR: ${prompt}
 
-Épisode: "${title}".
-Durée: ${dur} minutes.
-Demande du créateur: ${prompt}
-
-Écris un véritable scénario d'épisode cohérent et exploitable pour une animation.
-Respecte strictement les informations du projet et le lore fourni.
-Fais progresser l'histoire, donne des dialogues naturels, des actions claires et une mise en scène visuelle.
-Évite les répétitions et les remplissages.
-
-Structure la réponse en ${Math.max(15,dur*3)} plans minimum au format:
-[NUMÉRO - LIEU - MOMENT]
-ACTION: ...
-DIALOGUE: ...
+RÈGLES: respecte le canon; ne change jamais l'apparence, le rôle, les pouvoirs ou les relations établis; chaque scène fait avancer l'histoire; dialogues naturels et différents; pas de remplissage; vrais enjeux; début, développement, résolution ou cliffhanger.
+FORMAT STRICT:
+[01 - LIEU - MOMENT]
+ACTION: description visuelle précise.
+DIALOGUE:
+NomDuPersonnage: phrase
+NomDuPersonnage: phrase
 TRANSITION: ...
 
-Ne mets aucune introduction ni conclusion hors du scénario.`;
-
+IMPORTANT SOUS-TITRES: une réplique doit toujours être exactement « NOM : PHRASE ». N'écris JAMAIS le rôle, la fonction ou une description du personnage entre le nom et la phrase. Le champ RÔLE de l'encyclopédie sert uniquement au contexte interne.
+Produis au moins ${Math.max(15,dur*3)} scènes/plans utiles.`;
  try{
-   let r=await fetch('https://openrouter.ai/api/v1/chat/completions',{
-     method:'POST',
-     headers:{
-       'Content-Type':'application/json',
-       'Authorization':'Bearer '+openRouterKey,
-       'HTTP-Referer':location.href,
-       'X-Title':'C.N. Animation'
-     },
-     body:JSON.stringify({
-       model:openRouterModel,
-       messages:[
-         {
-           role:'system',
-           content:'Tu es un scénariste expert en animation. Tu privilégies la cohérence narrative, les personnages crédibles, les dialogues naturels et une mise en scène visuelle exploitable.'
-         },
-         {role:'user',content:full}
-       ],
-       temperature:0.85,
-       max_tokens:12000
-     })
-   });
-
-   let raw=await r.text(),d;
-   try{d=JSON.parse(raw)}catch(e){
-     throw new Error('Réponse OpenRouter invalide : '+raw.slice(0,300));
-   }
-   if(!r.ok) throw new Error(d.error?.message||('HTTP '+r.status));
-
-   let txt=d.choices?.[0]?.message?.content;
-   if(!txt) throw new Error('OpenRouter n’a renvoyé aucun scénario.');
-
-   cur.episodes.push({
-     id:'ep'+Date.now(),
-     saisonId:sid,
-     title,
-     prompt,
-     duration:dur,
-     generated:txt,
-     createdAt:new Date().toISOString(),
-     framesPrebuilt:null,
-     preFps:2,
-     preFluid:24
-   });
-
-   state.innerText='Prêt';
-   setTimeout(()=>{closeM('mEp');persist();go('eps');},400);
- }catch(e){
-   state.innerText='Erreur : '+e.message;
-   console.error(e);
- }
+  let r=await fetch('https://openrouter.ai/api/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key,'HTTP-Referer':location.href,'X-Title':'C.N. Animation'},body:JSON.stringify({model:OR_TEXT_MODEL,messages:[{role:'system',content:'Tu es un scénariste expert en animation et showrunner. Tu privilégies la continuité, les personnages crédibles, les dialogues naturels et la mise en scène visuelle. Le canon fourni est prioritaire.'},{role:'user',content:full}],temperature:.82,max_tokens:32768})});
+  let raw=await r.text(),d;try{d=JSON.parse(raw)}catch(e){throw new Error('Réponse OpenRouter invalide')}
+  if(!r.ok) throw new Error(d?.error?.message||`HTTP ${r.status}`);
+  let txt=d?.choices?.[0]?.message?.content;if(!txt)throw new Error('Aucun scénario reçu');
+  cur.episodes.push({id:'ep'+Date.now(),saisonId:sid,title,prompt,duration:dur,generated:txt,createdAt:new Date().toISOString(),framesPrebuilt:null,preFps:2,preFluid:24});
+  state.innerText='Prêt';setTimeout(()=>{closeM('mEp');persist();go('eps');},400);
+ }catch(e){state.innerText='Erreur : '+e.message;console.error(e);}
 }
-
 function resumePlayer(){ if(!playerState.epId) return; let idx=cur.episodes.findIndex(e=>e.id===playerState.epId); if(idx>=0) playEp(idx); }
 async function playEp(idx){let ep=cur.episodes[idx];if(playerState.active && playerState.epId===ep.id){ renderPlayerUI(ep); return; }stopPlayer();playerState.active=true; playerState.epId=ep.id; playerState.uniqueFps=ep.preFps||2; playerState.fluidFps=ep.preFluid||24; playerState.genAbort=false;renderPlayerUI(ep);startGenerationAndPlay(ep);}
 function renderPlayerUI(ep){let v=document.getElementById('view');v.innerHTML=`<div class="player"><div class="screen" id="scr"><img id="fA" class="frame" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover"><img id="fB" class="frame" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0"><div style="position:absolute;inset:0;background:linear-gradient(transparent 30%, rgba(0,0,0,.9));z-index:2"></div><div id="capt" style="position:absolute;bottom:0;left:0;right:0;z-index:3;padding:12px;font-size:12px;white-space:pre-wrap"></div><img id="logoShow" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);max-width:68%;max-height:42%;z-index:5;display:none"><div id="counter" style="position:absolute;top:10px;left:10px;z-index:4;font-size:10px;background:rgba(0,0,0,.6);padding:4px 8px;border-radius:20px"></div><div id="pre" style="position:absolute;inset:0;background:#000;z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px"><h2 style="font-family:Bebas Neue;font-size:28px">Chargement 8x...</h2><div style="width:70%;height:6px;background:#222;border-radius:10px;overflow:hidden"><div id="preBar" style="height:100%;background:#fff;width:0%"></div></div><div id="preCount" style="font-size:11px;color:#888"></div><button class="btn" style="margin-top:8px" onclick="stopPlayer();render();">Quitter (garde en fond)</button></div></div><div style="padding:10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><button class="btn" onclick="stopPlayer();render();">← Retour</button><div style="display:flex;gap:4px"><button class="btn" onclick="setUnique(1)" id="b1">1/sec</button><button class="btn" onclick="setUnique(2)" id="b2">2/sec</button><button class="btn" onclick="setUnique(3)" id="b3">3/sec</button></div><div style="display:flex;gap:4px;margin-left:6px"><button class="btn" onclick="setFluid(12)" id="f12">12 fps</button><button class="btn" onclick="setFluid(24)" id="f24">24 fps</button></div><button class="btn primary" id="playBtn" style="margin-left:auto">⏸</button></div></div>`;updateFpsButtons();}
@@ -232,22 +204,42 @@ window.setUnique=(n)=>{if(playerState.uniqueFps===n) return;if(playerState.isGen
 window.setFluid=(n)=>{playerState.fluidFps=n;let ep=cur.episodes.find(e=>e.id===playerState.epId);if(ep){ ep.preFluid=n; persist(); }updateFpsButtons();};
 async function startGenerationAndPlay(ep, force=false){
  let op=cur.generiques.find(g=>g.saisonId===ep.saisonId&&g.type==='opening');
- let plans=[]; if(op){plans.push(`[OPENING ${op.title}] ${op.visual}`); op.credits.split('\n').filter(l=>l.trim()).forEach(c=>plans.push(`[CREDIT] ${c}`));} plans=plans.concat(ep.generated.split('\n').filter(l=>l.trim().length>8));
- let totalUnique= ep.duration*60*playerState.uniqueFps;
- let logoSrc= op&&op.logo? await resolveImg(op.logo):'';
- function urlFor(txt, seed){return `https://image.pollinations.ai/prompt/${encodeURIComponent(txt.replace(/\[|\]/g,'').slice(0,100)+', cinematic anime key visual, clean lineart, consistent character, no deformation, 16:9')}?width=768&height=432&nologo=true&seed=${seed}`;}
- if(!force && ep.framesPrebuilt && ep.framesPrebuilt.length===totalUnique && ep.preFps===playerState.uniqueFps){playerState.frames=ep.framesPrebuilt; playerState.isGenerating=false;let pre=document.getElementById('pre'); if(pre) pre.style.display='none';playFrames(playerState.frames, ep, logoSrc); return;}
- playerState.isGenerating=true; playerState.genAbort=false; playerState.frames=new Array(totalUnique);
- while(plans.length<totalUnique) plans.push(plans[plans.length % Math.max(1,plans.length-1)]);
- let usePlans=plans.slice(0,totalUnique);let done=0; const CONCURRENT=8;
- async function loadOne(k){if(playerState.genAbort) return;let url=urlFor(usePlans[k], 1000+k);await new Promise(res=>{let im=new Image(); im.onload=()=>res(); im.onerror=()=>res(); im.src=url;});if(playerState.genAbort) return;playerState.frames[k]={text:usePlans[k], url}; done++;let bar=document.getElementById('preBar'), cnt=document.getElementById('preCount');if(bar) bar.style.width=(done/totalUnique*100)+'%';if(cnt) cnt.innerText=`${done}/${totalUnique} • 8x • SAVED auto • ${playerState.uniqueFps}/sec`;if(done%8===0){ ep.framesPrebuilt=[...playerState.frames]; ep.preFps=playerState.uniqueFps; ep.preFluid=playerState.fluidFps; try{ localStorage.setItem('cn-animation-v2',JSON.stringify(projects)); }catch(e){} }}
- for(let i=0;i<totalUnique;i+=CONCURRENT){if(playerState.genAbort) break;let batch=[]; for(let j=0;j<CONCURRENT && i+j<totalUnique;j++) batch.push(loadOne(i+j));await Promise.all(batch);}
- if(playerState.genAbort){ toast('Génération arrêtée'); return; }
- ep.framesPrebuilt=[...playerState.frames]; ep.preFps=playerState.uniqueFps; ep.preFluid=playerState.fluidFps; persist();playerState.isGenerating=false; let pre=document.getElementById('pre'); if(pre) pre.style.display='none';playFrames(playerState.frames, ep, logoSrc);
+ let plans=[];
+ if(op){plans.push(`[OPENING ${op.title}] ${op.visual}`); (op.credits||'').split('\n').filter(l=>l.trim()).forEach(c=>plans.push(`[CREDIT] ${c}`));}
+ plans=plans.concat(ep.generated.split(/\n(?=\[?\d+\s*[-–])/).map(x=>x.trim()).filter(x=>x.length>8));
+ if(plans.length<2) plans=ep.generated.split('\n').filter(l=>l.trim().length>8);
+ let totalUnique=Math.max(1,ep.duration*60*playerState.uniqueFps);
+ let logoSrc=op&&op.logo?await resolveImg(op.logo):'';
+ if(!force && ep.framesPrebuilt && ep.framesPrebuilt.length===totalUnique && ep.preFps===playerState.uniqueFps){playerState.frames=ep.framesPrebuilt;playerState.isGenerating=false;let pre=document.getElementById('pre');if(pre)pre.style.display='none';playFrames(playerState.frames,ep,logoSrc);return;}
+ playerState.isGenerating=true;playerState.genAbort=false;playerState.frames=new Array(totalUnique);
+ while(plans.length<totalUnique) plans.push(plans[(plans.length-1)%Math.max(1,plans.length)]);
+ let usePlans=plans.slice(0,totalUnique),done=0,CONCURRENT=2;
+ async function loadOne(k){
+  if(playerState.genAbort)return;
+  const raw=usePlans[k];
+  const refs=await refsForPlan(raw);
+  const refContext=refs.length?`\nRÉFÉRENCES VISUELLES FOURNIES : ${refs.map(r=>r.l.name).join(', ')}. Conserve fidèlement leur apparence visible dans les références. Ne les remplace pas par un autre design.`:'';
+  const clean=raw.replace(/^\[[^\]]+\]\s*/,'').replace(/\b(DIALOGUE|TRANSITION|ACTION)\s*:/gi,'');
+  const imagePrompt=`Anime cinematic storyboard frame, 16:9. Create ONE polished animation keyframe for this exact scene. ${clean}${refContext}\nSTYLE: coherent 2D/illustrated anime, clean line art, detailed but readable composition, expressive faces, correct anatomy, consistent clothing and colors, cinematic lighting, strong depth, appropriate camera angle, no text, no subtitles, no watermark. The scene must visually match the described action and location. Do not invent unrelated characters or objects. If reference images are supplied, they are authoritative for the appearance of those named elements.`;
+  try{
+   const url=await generateImageOpenRouter(imagePrompt,refs,1000+k);
+   if(playerState.genAbort)return;
+   playerState.frames[k]={text:extractDialogueCaption(raw)||raw,url};
+  }catch(e){
+   console.error('Image generation',k,e);
+   // Keep the scene alive with a clear fallback rather than crashing the whole episode.
+   playerState.frames[k]={text:extractDialogueCaption(raw)||raw,url:''};
+  }
+  done++;let bar=document.getElementById('preBar'),cnt=document.getElementById('preCount');if(bar)bar.style.width=(done/totalUnique*100)+'%';if(cnt)cnt.innerText=`${done}/${totalUnique} • références visuelles automatiques • Gemma + image`;
+  if(done%2===0){ep.framesPrebuilt=[...playerState.frames];ep.preFps=playerState.uniqueFps;ep.preFluid=playerState.fluidFps;try{localStorage.setItem('cn-animation-v2',JSON.stringify(projects));}catch(e){}}
+ }
+ for(let i=0;i<totalUnique;i+=CONCURRENT){if(playerState.genAbort)break;let batch=[];for(let j=0;j<CONCURRENT&&i+j<totalUnique;j++)batch.push(loadOne(i+j));await Promise.all(batch);}
+ if(playerState.genAbort){toast('Génération arrêtée');return;}
+ ep.framesPrebuilt=[...playerState.frames];ep.preFps=playerState.uniqueFps;ep.preFluid=playerState.fluidFps;persist();playerState.isGenerating=false;let pre=document.getElementById('pre');if(pre)pre.style.display='none';playFrames(playerState.frames,ep,logoSrc);
 }
 function playFrames(frames, ep, logoSrc){
  clearPlayerTimers();let fA=document.getElementById('fA'), fB=document.getElementById('fB');if(!fA) return;let curImg=fA, nextImg=fB; let idxFrame=0, playing=true;
- function showUnique(k){if(k>=frames.length){ let c=document.getElementById('capt'); if(c) c.innerText='FIN — '+ep.title; playing=false; return; }if(!frames[k]) return;let capt=document.getElementById('capt'); if(capt) capt.innerText=frames[k].text;let counter=document.getElementById('counter'); if(counter) counter.innerText=`${k}/${frames.length} • SAVED • ${playerState.uniqueFps}/sec • ${playerState.fluidFps}fps`;if(nextImg){ nextImg.style.opacity=0; nextImg.src=frames[k].url; nextImg.onload=()=>{nextImg.style.opacity=1; curImg.style.opacity=0; let t=curImg; curImg=nextImg; nextImg=t;}; }if(k===2 && logoSrc){ let l=document.getElementById('logoShow'); if(l){ l.src=logoSrc; l.style.display='block'; setTimeout(()=>{if(l) l.style.display='none'},3000); } }}
+ function showUnique(k){if(k>=frames.length){ let c=document.getElementById('capt'); if(c) c.innerText='FIN — '+ep.title; playing=false; return; }if(!frames[k]) return;let capt=document.getElementById('capt'); if(capt) capt.innerText=extractDialogueCaption(frames[k].text)||frames[k].text;let counter=document.getElementById('counter'); if(counter) counter.innerText=`${k}/${frames.length} • SAVED • ${playerState.uniqueFps}/sec • ${playerState.fluidFps}fps`;if(nextImg){ nextImg.style.opacity=0; nextImg.src=frames[k].url; nextImg.onload=()=>{nextImg.style.opacity=1; curImg.style.opacity=0; let t=curImg; curImg=nextImg; nextImg=t;}; }if(k===2 && logoSrc){ let l=document.getElementById('logoShow'); if(l){ l.src=logoSrc; l.style.display='block'; setTimeout(()=>{if(l) l.style.display='none'},3000); } }}
  showUnique(0);
  let it1=setInterval(()=>{ if(!playing) return; idxFrame++; if(idxFrame<frames.length) showUnique(idxFrame); }, 1000/playerState.uniqueFps);
  let it2=setInterval(()=>{ if(!playing) return; let s=1.15+Math.sin(Date.now()/600)*0.05; if(curImg) curImg.style.transform=`scale(${s}) translate(${Math.sin(Date.now()/400)*4}px, ${Math.cos(Date.now()/500)*3}px)`; }, 1000/playerState.fluidFps);
@@ -255,7 +247,7 @@ function playFrames(frames, ep, logoSrc){
  let playBtn=document.getElementById('playBtn'); if(playBtn) playBtn.onclick=()=>{playing=!playing; playBtn.innerText=playing?'⏸':'▶';};
 }
 function exportCurrent(){if(!cur) return;let b=new Blob([JSON.stringify(cur,null,2)],{type:'application/json'});let a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=cur.name.replace(/\s+/g,'_')+'.json';a.click();}
-loadProjects();initOpenRouterUI();renderList();render();
+loadProjects();renderList();render();
 </script>
 </body>
 </html>
