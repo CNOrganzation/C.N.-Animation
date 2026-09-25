@@ -49,6 +49,14 @@ body{background:#050507;color:#fff;height:100dvh;display:flex;overflow:hidden}
 <button class="btn primary" style="width:100%;height:44px" onclick="openNew()">+ Nouveau projet</button>
 <div style="display:flex;gap:6px"><input class="input" id="sbUrl" placeholder="Supabase URL"><input class="input" id="sbKey" placeholder="anon key"></div>
 <button class="btn" style="width:100%" onclick="connect()">Connecter cloud</button>
+<input class="input" id="orKey" type="password" placeholder="OpenRouter API key">
+<select class="input" id="orModel">
+<option value="openrouter/free">OpenRouter Free (auto)</option>
+<option value="nex-agi/nex-n2.5-pro:free">Nex-N2.5-Pro Free</option>
+<option value="poolside/laguna-s-2.1-20260720:free">Laguna S 2.1 Free</option>
+</select>
+<button class="btn" style="width:100%" onclick="saveOpenRouter()">Enregistrer IA</button>
+<p style="font-size:10px;color:#666">IA épisodes : OpenRouter</p>
 <p style="font-size:10px;color:#666">FIX: gen ne s'annule plus si tu quittes</p>
 </div>
 <div class="list" id="projList"></div>
@@ -75,6 +83,8 @@ function openSide(){document.getElementById('sidebar').classList.add('open');doc
 function closeSide(){document.getElementById('sidebar').classList.remove('open');document.getElementById('overlay').classList.remove('show');}
 function toast(t){let el=document.getElementById('toast');el.innerText=t;el.style.display='block';setTimeout(()=>el.style.display='none',2500);}
 let supa=null,useCloud=false,projects=[],cur=null,curTab='dash',editLore=null,editGen=null,pendingLoreFile=null,pendingGenFile=null,pendingLoreUrl='',pendingGenUrl='';
+let openRouterKey=localStorage.getItem('cn-animation-openrouter-key')||'';
+let openRouterModel=localStorage.getItem('cn-animation-openrouter-model')||'openrouter/free';
 let playerState={active:false,epId:null,intervals:[],isGenerating:false,frames:[],uniqueFps:2,fluidFps:24,genAbort:false};
 function clearPlayerTimers(){playerState.intervals.forEach(i=>clearInterval(i));playerState.intervals=[];}
 function stopPlayer(){clearPlayerTimers();playerState.active=false;playerState.isGenerating=false;playerState.genAbort=true;}
@@ -87,6 +97,21 @@ function loadProjects(){try{projects=JSON.parse(localStorage.getItem('cn-animati
 function persist(){try{localStorage.setItem('cn-animation-v2',JSON.stringify(projects));if(useCloud&&supa) saveCloud();renderList();if(!playerState.active) render();}catch(e){alert('Stockage plein');}}
 async function resolveImg(key){ if(!key) return ''; if(key.startsWith('http')) return key; if(key.startsWith('idb:')) return await getImageLocal(key); return key; }
 async function hydrateImgs(){ document.querySelectorAll('[data-img]').forEach(async el=>{let k=el.getAttribute('data-img');let s=await resolveImg(k); if(s) el.src=s;});}
+function initOpenRouterUI(){
+ let k=document.getElementById('orKey'),m=document.getElementById('orModel');
+ if(k) k.value=openRouterKey;
+ if(m) m.value=openRouterModel;
+}
+function saveOpenRouter(){
+ let k=document.getElementById('orKey').value.trim();
+ let m=document.getElementById('orModel').value;
+ if(!k) return alert('Clé OpenRouter manquante');
+ openRouterKey=k;
+ openRouterModel=m;
+ localStorage.setItem('cn-animation-openrouter-key',k);
+ localStorage.setItem('cn-animation-openrouter-model',m);
+ toast('IA OpenRouter enregistrée');
+}
 async function connect(){let u=document.getElementById('sbUrl').value.trim(),k=document.getElementById('sbKey').value.trim();if(!u||!k) return alert('URL + key');supa=supabase.createClient(u,k);useCloud=true;document.getElementById('sync').innerText='CLOUD';try{let {data}=await supa.from('cn_projects').select('*');if(data&&data.length&&data[0].data){projects=data[0].data;cur=projects[0];localStorage.setItem('cn-animation-v2',JSON.stringify(projects));}else{await saveCloud();}}catch(e){}renderList();render();}
 async function saveCloud(){if(!supa) return; try{await supa.from('cn_projects').upsert({id:1,data:projects});}catch(e){}}
 function openNew(){document.getElementById('mProj').classList.add('open');}
@@ -104,7 +129,101 @@ async function openGenM(pre=null,editIdx=null){let s=document.getElementById('gS
 async function saveGen(){let sid=document.getElementById('gSeason').value; if(!sid) return alert('Saison'); let type=document.getElementById('gType').value; let exists=cur.generiques.find(g=>g.saisonId===sid && g.type===type && cur.generiques.indexOf(g)!==editGen); if(exists) return alert(type+' existe déjà (1 max)'); let logoKey=editGen!==null?cur.generiques[editGen].logo||'':''; if(pendingGenFile){ if(useCloud) logoKey=await uploadToSupabase(pendingGenFile); else logoKey=await saveImageLocal(pendingGenUrl); } let obj={id:editGen!==null?cur.generiques[editGen].id:'g'+Date.now(),saisonId:sid,type, title:document.getElementById('gTitle').value,music:document.getElementById('gMusic').value,visual:document.getElementById('gVisual').value,credits:document.getElementById('gCredits').value,logo:logoKey}; if(editGen!==null) cur.generiques[editGen]=obj; else cur.generiques.push(obj); closeM('mGen'); persist();}
 function delGen(i){if(confirm('Supprimer?')){cur.generiques.splice(i,1); persist();}}
 function openGenEp(){if(!cur.saisons.length) return alert('Saison');let sel=document.getElementById('eSeason');sel.innerHTML=cur.saisons.map(s=>`<option value="${s.id}">${s.name}</option>`).join('');document.getElementById('mEp').classList.add('open');}
-async function generate(){if(cur.episodes.length>=200) return alert('200 max');let sid=document.getElementById('eSeason').value,title=document.getElementById('eTitle').value.trim()||`Épisode ${cur.episodes.length+1}`,prompt=document.getElementById('ePrompt').value.trim(),dur=parseInt(document.getElementById('eDur').value)||15;if(!prompt) return alert('Prompt');let state=document.getElementById('genState');state.innerText='Génération...';let lore=cur.lore.map(l=>`[${l.type}] ${l.name}: ${l.desc}`).join('\n').slice(0,6000);let saison=cur.saisons.find(s=>s.id===sid);let full=`Anime ${cur.type} "${cur.name}" Synopsis: ${cur.synopsis}. Saison ${saison.name} - ${saison.theme}. LORE: ${lore}. Episode "${title}" dure ${dur}min: ${prompt}. Ecris ${dur*3} plans [LIEU - ACTION] dialogue.`;try{let r=await fetch('https://text.pollinations.ai/openai',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'open',messages:[{role:'user',content:full}]})});let d=await r.json();let txt=d.choices?d.choices[0].message.content:await r.text();cur.episodes.push({id:'ep'+Date.now(),saisonId:sid,title,prompt,duration:dur,generated:txt,createdAt:new Date().toISOString(),framesPrebuilt:null,preFps:2,preFluid:24});state.innerText='Prêt';setTimeout(()=>{closeM('mEp');persist();go('eps');},400);}catch(e){state.innerText='Erreur '+e;}}
+async function generate(){
+ if(cur.episodes.length>=200) return alert('200 max');
+ if(!openRouterKey) return alert('Ajoute ta clé OpenRouter dans la barre latérale puis clique sur « Enregistrer IA ».');
+
+ let sid=document.getElementById('eSeason').value;
+ let title=document.getElementById('eTitle').value.trim()||`Épisode ${cur.episodes.length+1}`;
+ let prompt=document.getElementById('ePrompt').value.trim();
+ let dur=parseInt(document.getElementById('eDur').value)||15;
+ if(!prompt) return alert('Prompt');
+
+ let state=document.getElementById('genState');
+ state.innerText='Génération avec OpenRouter...';
+
+ let lore=cur.lore.map(l=>`[${l.type}] ${l.name}: ${l.desc}`).join('\n').slice(0,6000);
+ let saison=cur.saisons.find(s=>s.id===sid);
+
+ let full=`Tu es le scénariste principal de la série "${cur.name}".
+Type: ${cur.type}.
+Synopsis: ${cur.synopsis||'Aucun'}.
+Saison: ${saison?saison.name:'Inconnue'}.
+Arc: ${saison?saison.theme:'Aucun'}.
+
+LORE:
+${lore||'Aucun lore renseigné'}
+
+Épisode: "${title}".
+Durée: ${dur} minutes.
+Demande du créateur: ${prompt}
+
+Écris un véritable scénario d'épisode cohérent et exploitable pour une animation.
+Respecte strictement les informations du projet et le lore fourni.
+Fais progresser l'histoire, donne des dialogues naturels, des actions claires et une mise en scène visuelle.
+Évite les répétitions et les remplissages.
+
+Structure la réponse en ${Math.max(15,dur*3)} plans minimum au format:
+[NUMÉRO - LIEU - MOMENT]
+ACTION: ...
+DIALOGUE: ...
+TRANSITION: ...
+
+Ne mets aucune introduction ni conclusion hors du scénario.`;
+
+ try{
+   let r=await fetch('https://openrouter.ai/api/v1/chat/completions',{
+     method:'POST',
+     headers:{
+       'Content-Type':'application/json',
+       'Authorization':'Bearer '+openRouterKey,
+       'HTTP-Referer':location.href,
+       'X-Title':'C.N. Animation'
+     },
+     body:JSON.stringify({
+       model:openRouterModel,
+       messages:[
+         {
+           role:'system',
+           content:'Tu es un scénariste expert en animation. Tu privilégies la cohérence narrative, les personnages crédibles, les dialogues naturels et une mise en scène visuelle exploitable.'
+         },
+         {role:'user',content:full}
+       ],
+       temperature:0.85,
+       max_tokens:12000
+     })
+   });
+
+   let raw=await r.text(),d;
+   try{d=JSON.parse(raw)}catch(e){
+     throw new Error('Réponse OpenRouter invalide : '+raw.slice(0,300));
+   }
+   if(!r.ok) throw new Error(d.error?.message||('HTTP '+r.status));
+
+   let txt=d.choices?.[0]?.message?.content;
+   if(!txt) throw new Error('OpenRouter n’a renvoyé aucun scénario.');
+
+   cur.episodes.push({
+     id:'ep'+Date.now(),
+     saisonId:sid,
+     title,
+     prompt,
+     duration:dur,
+     generated:txt,
+     createdAt:new Date().toISOString(),
+     framesPrebuilt:null,
+     preFps:2,
+     preFluid:24
+   });
+
+   state.innerText='Prêt';
+   setTimeout(()=>{closeM('mEp');persist();go('eps');},400);
+ }catch(e){
+   state.innerText='Erreur : '+e.message;
+   console.error(e);
+ }
+}
+
 function resumePlayer(){ if(!playerState.epId) return; let idx=cur.episodes.findIndex(e=>e.id===playerState.epId); if(idx>=0) playEp(idx); }
 async function playEp(idx){let ep=cur.episodes[idx];if(playerState.active && playerState.epId===ep.id){ renderPlayerUI(ep); return; }stopPlayer();playerState.active=true; playerState.epId=ep.id; playerState.uniqueFps=ep.preFps||2; playerState.fluidFps=ep.preFluid||24; playerState.genAbort=false;renderPlayerUI(ep);startGenerationAndPlay(ep);}
 function renderPlayerUI(ep){let v=document.getElementById('view');v.innerHTML=`<div class="player"><div class="screen" id="scr"><img id="fA" class="frame" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover"><img id="fB" class="frame" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0"><div style="position:absolute;inset:0;background:linear-gradient(transparent 30%, rgba(0,0,0,.9));z-index:2"></div><div id="capt" style="position:absolute;bottom:0;left:0;right:0;z-index:3;padding:12px;font-size:12px;white-space:pre-wrap"></div><img id="logoShow" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);max-width:68%;max-height:42%;z-index:5;display:none"><div id="counter" style="position:absolute;top:10px;left:10px;z-index:4;font-size:10px;background:rgba(0,0,0,.6);padding:4px 8px;border-radius:20px"></div><div id="pre" style="position:absolute;inset:0;background:#000;z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px"><h2 style="font-family:Bebas Neue;font-size:28px">Chargement 8x...</h2><div style="width:70%;height:6px;background:#222;border-radius:10px;overflow:hidden"><div id="preBar" style="height:100%;background:#fff;width:0%"></div></div><div id="preCount" style="font-size:11px;color:#888"></div><button class="btn" style="margin-top:8px" onclick="stopPlayer();render();">Quitter (garde en fond)</button></div></div><div style="padding:10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><button class="btn" onclick="stopPlayer();render();">← Retour</button><div style="display:flex;gap:4px"><button class="btn" onclick="setUnique(1)" id="b1">1/sec</button><button class="btn" onclick="setUnique(2)" id="b2">2/sec</button><button class="btn" onclick="setUnique(3)" id="b3">3/sec</button></div><div style="display:flex;gap:4px;margin-left:6px"><button class="btn" onclick="setFluid(12)" id="f12">12 fps</button><button class="btn" onclick="setFluid(24)" id="f24">24 fps</button></div><button class="btn primary" id="playBtn" style="margin-left:auto">⏸</button></div></div>`;updateFpsButtons();}
@@ -136,7 +255,7 @@ function playFrames(frames, ep, logoSrc){
  let playBtn=document.getElementById('playBtn'); if(playBtn) playBtn.onclick=()=>{playing=!playing; playBtn.innerText=playing?'⏸':'▶';};
 }
 function exportCurrent(){if(!cur) return;let b=new Blob([JSON.stringify(cur,null,2)],{type:'application/json'});let a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=cur.name.replace(/\s+/g,'_')+'.json';a.click();}
-loadProjects();renderList();render();
+loadProjects();initOpenRouterUI();renderList();render();
 </script>
 </body>
 </html>
